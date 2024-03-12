@@ -19,10 +19,9 @@ import java.util.Collection
 import java.util.Collections
 import java.util.Map
 
-import io.netty.channel.unix.NativeInetAddress.address
-
 class UcxServerSocketChannel(parent: Channel)
     extends AbstractUcxChannel(parent) with ServerSocketChannel with UcxLogging {
+    logDev(s"UcxServerSocketChannel()")
 
     protected val ucxServerConfig = new UcxServerSocketChannelConfig(this)
     protected var underlyingUnsafe: UcxServerUnsafe = _
@@ -32,7 +31,7 @@ class UcxServerSocketChannel(parent: Channel)
     }
 
     override
-    def ucxUnsafe(): AbstractUcxUnsafe = underlyingUnsafe
+    def ucxUnsafe: AbstractUcxUnsafe = underlyingUnsafe
 
     override
     def config() = ucxServerConfig
@@ -48,80 +47,102 @@ class UcxServerSocketChannel(parent: Channel)
 
     override
     protected def doBind(localAddress: SocketAddress) = {
-        local = localAddress.asInstanceOf[InetSocketAddress]
-        remote = null
-        ucxUnsafe.setSocketAddress(local)
+        logDev(s"doBind() $localAddress <- _")
+        // Called inside AbstractUnsafe.bind.try in eventLoop
+        ucxUnsafe.setSocketAddress(localAddress.asInstanceOf[InetSocketAddress])
         ucxUnsafe.dolisten0()
-        opened = true
-        active = true
     }
 
     override
     protected def doClose(): Unit = {
+        eventLoopRun(() => try {
+            ucxUnsafe.doClose0()
+        } catch {
+            case e: Throwable => pipeline().fireExceptionCaught(e)
+        })
+
         super.doClose()
-        ucxUnsafe.doClose0()
     }
-    
-    protected def newChildChannel(epIn: UcpEndpoint): UcxSocketChannel = {
-        val child = new UcxSocketChannel(this)
-        child.ucxUnsafe.doAccept0(epIn)
-        child
+
+    protected def newChildChannel(): UcxSocketChannel = {
+        logDev(s"newChildChannel()")
+        new UcxSocketChannel(this)
     }
 
     override
     protected def newUnsafe(): AbstractUcxUnsafe = {
+        logDev(s"newUnsafe()")
         underlyingUnsafe = new UcxServerUnsafe()
         underlyingUnsafe
     }
 
     class UcxServerUnsafe extends AbstractUcxUnsafe {
+        logDev(s"UcxServerUnsafe()")
         val ucpConnectHandler = new UcpListenerConnectionHandler {
             override def onConnectionRequest(request: UcpConnectionRequest) = {
-                val id = request.getClientId
-                val address = request.getClientAddress
-
                 setConnectionRequest(request)
-                setErrorHandler(ucpErrHandler(s"Endpoint to $address"))
-
-                val epIn = ucpWorker.newEndpoint(ucpEpParam)
-                pipeline.fireChannelRead(newChildChannel(epIn))
+                doAccept0()
             }
         }
 
         val ucpListenerParam = new UcpListenerParams().setConnectionHandler(ucpConnectHandler)
         var ucpListener: UcpListener = _
-        var ucpSocketAddress: InetSocketAddress = _
 
-        protected def ucpWorker = ucxEventLoop.ucpWorker
-
-        protected def setConnectionRequest(ucpConnectionRequest: UcpConnectionRequest): Unit = {
-            ucpEpParam.setConnectionRequest(ucpConnectionRequest)
+        val ucpErrHandler = new UcpEndpointErrorHandler() {
+            override def onError(ep: UcpEndpoint, status: Int, errorMsg: String): Unit = {
+                logError(s"$ep: $errorMsg")
+                ucxEventLoop.delChannel(ep.getNativeId())
+            }
         }
-
-        protected def setErrorHandler(errHandler: UcpEndpointErrorHandler): Unit = {
-            ucpEpParam.setPeerErrorHandlingMode().setErrorHandler(errHandler)
-        }
+        val ucpEpParam = new UcpEndpointParams()
 
         override
         def connect(
             remoteAddress: SocketAddress, localAddress: SocketAddress,
             promise: ChannelPromise): Unit = {
+            logDev(s"connect() $remoteAddress $localAddress")
             // Connect not supported by ServerChannel implementations
             promise.setFailure(new UnsupportedOperationException())
         }
 
         override
-        def setSocketAddress(address: InetSocketAddress): Unit = {
-            ucpListenerParam.setSockAddr(address)
-            ucpSocketAddress = address
+        def setConnectionRequest(request: UcpConnectionRequest): Unit = {
+            val address = request.getClientAddress()
+            ucpEpParam.setConnectionRequest(request)
+                .setPeerErrorHandlingMode()
+                .setErrorHandler(ucpErrHandler)
+                .setName(s"Ep from ${address}")
         }
+
+        override
+        def setSocketAddress(address: InetSocketAddress): Unit = {
+            logDev(s"setSocketAddress() $address")
+            ucpListenerParam.setSockAddr(address)
+            local = address
+        }
+
         override
         def dolisten0():Unit = {
+            logDev(s"dolisten0()")
             ucpListener = ucpWorker.newListener(ucpListenerParam)
+            active = true
+        }
+
+        override
+        def doAccept0(): Unit = {
+            val childChannel = newChildChannel()
+            val ep = ucpWorker.newEndpoint(ucpEpParam)
+
+            childChannel.ucxUnsafe.setUcpEp(ep)
+            ucxEventLoop.addChannel(ep.getNativeId(), childChannel)
+            pipeline.fireChannelRead(childChannel)
+
+            logDebug(s"accept $local <- $remote")
         }
 
         override
         def doClose0():Unit = {
+            logDev(s"doClose0()")
             if (ucpListener != null) {
                 ucpListener.close()
                 ucpListener = null

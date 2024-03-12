@@ -122,7 +122,7 @@ See file LICENSE for terms.
     <dependency>
       <groupId>org.openucx</groupId>
       <artifactId>jucx</artifactId>
-      <version>1.16.0-rc4</version>
+      <version>1.16.0</version>
     </dependency>
   </dependencies>
 

@@ -21,9 +21,6 @@ import io.netty.channel.RecvByteBufAllocator.ExtendedHandle
 import io.netty.channel.socket.ChannelInputShutdownEvent
 import io.netty.channel.socket.ChannelInputShutdownReadComplete
 import io.netty.channel.socket.SocketChannelConfig
-import io.netty.channel.unix.FileDescriptor
-import io.netty.channel.unix.Socket
-import io.netty.channel.unix.UnixChannel
 import io.netty.util.ReferenceCountUtil
 
 import java.io.IOException
@@ -39,7 +36,6 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 import io.netty.channel.internal.ChannelUtils.WRITE_STATUS_SNDBUF_FULL
-import io.netty.channel.unix.UnixChannelUtil.computeRemoteAddr
 import io.netty.util.internal.ObjectUtil.checkNotNull
 
 import java.net.InetSocketAddress
@@ -48,9 +44,11 @@ import java.nio.charset.StandardCharsets
 
 abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(parent) with UcxLogging {
 
-    protected def ucxEventLoop(): UcxEventLoop = eventLoop().asInstanceOf[UcxEventLoop]
+    // Ucx apis
+    protected[ucx] def ucxUnsafe: AbstractUcxUnsafe = ???
+    protected[ucx] def ucxEventLoop = eventLoop().asInstanceOf[UcxEventLoop]
 
-    protected def eventLoopRun(fn: () => Unit):Unit = {
+    protected[ucx] def eventLoopRun(fn: () => Unit):Unit = {
         val loop = eventLoop()
         if (loop.inEventLoop()) {
             fn()
@@ -69,61 +67,39 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     @volatile protected var local: InetSocketAddress = _
     @volatile protected var remote: InetSocketAddress = _
     @volatile protected var active: Boolean = false
-    @volatile protected var opened: Boolean = false
+    @volatile protected var opened: Boolean = true
 
     def this() = {
         this(null)
     }
 
-    // Ucx apis
-    def ucxUnsafe(): AbstractUcxUnsafe = ???
-
-    def newDirectBuffer( buf: ByteBuf): ByteBuf = {
+    def newDirectBuffer(buf: ByteBuf): ByteBuf = {
         newDirectBuffer(buf, buf)
     }
 
     def newDirectBuffer(holder: Object, buf: ByteBuf): ByteBuf = {
         val readableBytes = buf.readableBytes()
-        if (readableBytes == 0) {
-            ReferenceCountUtil.release(holder)
-            return Unpooled.EMPTY_BUFFER
-        }
-
-        val allocator = alloc()
-        if (allocator.isDirectBufferPooled()) {
-            return newDirectBuffer0(holder, buf, allocator, readableBytes)
-        }
-
-        val directBuf = ByteBufUtil.threadLocalDirectBuffer()
-        if (directBuf == null) {
-            return newDirectBuffer0(holder, buf, allocator, readableBytes)
-        }
+        val allocator = config().getAllocator()
+        val directBuf = PreferredDirectByteBufAllocator.directBuffer0(
+            allocator, readableBytes)
 
         directBuf.writeBytes(buf, buf.readerIndex(), readableBytes)
         ReferenceCountUtil.safeRelease(holder)
         return directBuf
     }
 
-    private def newDirectBuffer0(
-        holder: Object, buf: ByteBuf, allocator: ByteBufAllocator,
-        capacity: Int): ByteBuf = {
-        val directBuf = allocator.directBuffer(capacity)
-        directBuf.writeBytes(buf, buf.readerIndex(), capacity)
-        ReferenceCountUtil.safeRelease(holder)
-        return directBuf
-    }
-
     def ucxRead(ucpAmData: UcpAmData): Unit = doReadAmData(ucpAmData)
 
-    def ucxConnectBack(remoteId: Long, address: ByteBuffer): Unit = {
+    def ucxHandleConnect(remoteId: Long, address: ByteBuffer): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
         ucxUnsafe.setUcpAddress(address)
-        ucxUnsafe.doConnectBack0()
+        eventLoopRun(ucxUnsafe.doConnectedBack0 _)
     }
 
-    def ucxConnectDone(remoteId: Long): Unit = {
+    def ucxHandleConnectAck(remoteId: Long, endpoint: UcpEndpoint): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
-        ucxUnsafe.doConnectDone0()
+        ucxUnsafe.setActionEp(endpoint)
+        ucxUnsafe.doConnectDone()
     }
 
     override
@@ -144,19 +120,15 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     protected abstract class AbstractUcxUnsafe extends AbstractUnsafe {
         val uniqueId = new NettyUcxId()
         val remoteId = new NettyUcxId()
-        val ucpEpParam = new UcpEndpointParams()
 
-        private var allocHandle: UcxRecvByteAllocatorHandle = _
+        protected[ucx] def ucpWorker = ucxEventLoop.ucpWorker
 
-        protected def ucpErrHandler(msg: => String) = new UcpEndpointErrorHandler() {
-            override def onError(ep: UcpEndpoint, status: Int, errorMsg: String): Unit = {
-                logError(s"$msg: $ep => $errorMsg")
-            }
-        }
+        protected var allocHandle: UcxRecvByteAllocatorHandle = _
 
         override
         def recvBufAllocHandle(): UcxRecvByteAllocatorHandle = {
             if (allocHandle == null) {
+                logDev(s"recvBufAllocHandle() $allocHandle")
                 allocHandle = new UcxRecvByteAllocatorHandle(
                     super.recvBufAllocHandle().asInstanceOf[ExtendedHandle])
             }
@@ -164,8 +136,8 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         }
 
         override
-        protected def flush0(): Unit = {
-            // PASS
+        def flush0(): Unit = {
+            super.flush0()
         }
 
         override
@@ -175,6 +147,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                 return
             }
 
+            logDev(s"connect() $localAddress->$remoteAddress promise=$promise")
             try {
                 if (connectPromise != null) {
                     throw new ConnectionPendingException()
@@ -190,6 +163,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                     connectTimeoutFuture = eventLoop().schedule(() => {
                         val cause = new ConnectTimeoutException("connection timed out: " + remoteAddress)
                         if (connectPromise != null && connectPromise.tryFailure(cause)) {
+                            logDev(s"connect() $localAddress->$remoteAddress timeout $connectTimeoutMillis ms")
                             close(voidPromise())
                         }
                     }
@@ -199,6 +173,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                 promise.addListener(new ChannelFutureListener() {
                     override
                     def operationComplete(future: ChannelFuture) = {
+                        logDev(s"connect() $localAddress->$remoteAddress complete $future")
                         if (future.isCancelled()) {
                             if (connectTimeoutFuture != null) {
                                 connectTimeoutFuture.cancel(false)
@@ -210,6 +185,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                 })
             } catch {
                 case t: Throwable => {
+                    logDev(s"connect() $localAddress->$remoteAddress error $t")
                     closeIfClosed()
                     promise.tryFailure(annotateConnectException(t, remoteAddress))
                 }
@@ -219,23 +195,26 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         protected def finishConnect(remoteAddress: SocketAddress): Unit = {
             // Note this method is invoked by the event loop only if the connection attempt was
             // neither cancelled nor timed out.
-
             assert(eventLoop().inEventLoop())
 
             try {
                 val wasActive = isActive()
+                logDev(s"finishConnect() $remoteAddress wasActive=$wasActive")
                 fulfillConnectPromise(connectPromise, wasActive)
                 if (connectTimeoutFuture != null) {
+                    logDev(s"finishConnect() $remoteAddress connectTimeoutFuture=$connectTimeoutFuture")
                     connectTimeoutFuture.cancel(false)
                 }
                 connectPromise = null
             } catch {
                 case t: Throwable =>
+                    logDev(s"finishConnect() $remoteAddress t=$t")
                     fulfillConnectPromise(connectPromise, annotateConnectException(t, remoteAddress))
             }
         }
 
         private def fulfillConnectPromise(promise: ChannelPromise, wasActive: Boolean): Unit = {
+            logDev(s"fulfillConnectPromise() promise=$promise wasActive=$wasActive")
             if (promise == null) {
                 // Closed via cancellation and the promise has been notified already.
                 return
@@ -252,6 +231,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             // Regardless if the connection attempt was cancelled, channelActive() event should be triggered,
             // because what happened is what happened.
             if (!wasActive && nowActive) {
+                logDev(s"fulfillConnectPromise() fireChannelActive()")
                 pipeline().fireChannelActive()
             }
         
@@ -272,7 +252,19 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             closeIfClosed()
         }
 
+        def setConnectionRequest(ucpConnectionRequest: UcpConnectionRequest): Unit = {
+            throw new UnsupportedOperationException()
+        }
+
         def setSocketAddress(address: InetSocketAddress): Unit = {
+            throw new UnsupportedOperationException()
+        }
+
+        def setActionEp(endpoint: UcpEndpoint): Unit = {
+            throw new UnsupportedOperationException()
+        }
+
+        def setUcpEp(endpoint: UcpEndpoint): Unit = {
             throw new UnsupportedOperationException()
         }
 
@@ -284,23 +276,19 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             throw new UnsupportedOperationException()
         }
 
+        def doAccept0(): Unit = {
+            throw new UnsupportedOperationException()
+        }
+
         def doConnect0(): Unit = {
             throw new UnsupportedOperationException()
         }
 
-        def doConnectDone0(): Unit = {
+        def doConnectedBack0(): Unit = {
             throw new UnsupportedOperationException()
         }
 
-        def doAccept0(epIn: UcpEndpoint): Unit = {
-            throw new UnsupportedOperationException()
-        }
-
-        def doConnectBack0(): Unit = {
-            throw new UnsupportedOperationException()
-        }
-
-        def doConnectedBackDone0(): Unit = {
+        def doConnectDone(): Unit = {
             throw new UnsupportedOperationException()
         }
 
@@ -326,6 +314,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     protected def doClose(): Unit = {
         active = false
         try {
+            logDev(s"doClose() connectPromise=$connectPromise connectTimeoutFuture=$connectTimeoutFuture")
             val promise = connectPromise
             if (promise != null) {
                 // Use tryFailure() instead of setFailure() to avoid the race against cancel().
@@ -340,7 +329,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             }
 
             if (isRegistered()) {
-                eventLoopRun(doDeregister _)
+                doDeregister()
             }
         } finally {
         }
@@ -348,11 +337,13 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     override
     protected def doRegister(): Unit = {
+        logDev(s"doRegister() $this to $ucxEventLoop($ucxEventLoop.ucpWorker)")
         ucxEventLoop.addChannel(this)
     }
-
+    
     override
     protected def doDeregister(): Unit = {
+        logDev(s"doDeregister() $this to $ucxEventLoop($ucxEventLoop.ucpWorker)")
         ucxEventLoop.delChannel(this)
     }
 
@@ -363,11 +354,13 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     override
     protected def doDisconnect(): Unit = {
+        logDev(s"doDisconnect()")
         doClose()
     }
 
     override
     protected final def doBeginRead(): Unit = {
+        logDev(s"doBeginRead()")
     }
 
     override

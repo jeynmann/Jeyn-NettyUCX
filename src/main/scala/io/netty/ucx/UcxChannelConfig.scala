@@ -72,13 +72,36 @@ class UcxServerSocketChannelConfig(channel: AbstractUcxChannel)
         this
     }
 
-    def getBacklog(): Int = ???
-    def getReceiveBufferSize(): Int = ???
-    def isReuseAddress(): Boolean = ???
-    def setBacklog(x$1: Int): this.type = this
-    def setPerformancePreferences(x$1: Int,x$2: Int,x$3: Int): this.type = this
-    def setReceiveBufferSize(x$1: Int): this.type = this
-    def setReuseAddress(x$1: Boolean): this.type = this
+    def getBacklog(): Int = backlog
+
+    def getReceiveBufferSize(): Int = receiveBufferSize
+
+    def isReuseAddress(): Boolean = reuseAddress
+
+    def setBacklog(x: Int): this.type = {
+        backlog = x
+        this
+    }
+
+    def setPerformancePreferences(x1: Int, x2: Int, x3: Int): this.type = {
+        performancePreferences = Array(x1, x2, x3)
+        this
+    }
+
+    def setReceiveBufferSize(x: Int): this.type = {
+        receiveBufferSize = x
+        this
+    }
+
+    def setReuseAddress(x: Boolean): this.type = {
+        reuseAddress = x
+        this
+    }
+
+    private var backlog = 0
+    private var receiveBufferSize = 0
+    private var reuseAddress = true
+    private var performancePreferences = Array(0, 0, 0)
 }
 
 class UcxSocketChannelConfig(channel: AbstractUcxChannel)
@@ -140,21 +163,75 @@ class UcxSocketChannelConfig(channel: AbstractUcxChannel)
         this
     }
 
-    def getReceiveBufferSize(): Int = ???
-    def getSendBufferSize(): Int = ???
-    def getSoLinger(): Int = ???
-    def getTrafficClass(): Int = ???
-    def isAllowHalfClosure(): Boolean = ???
-    def isKeepAlive(): Boolean = ???
-    def isReuseAddress(): Boolean = ???
-    def isTcpNoDelay(): Boolean = ???
-    def setAllowHalfClosure(x$1: Boolean): this.type = this
-    def setKeepAlive(x$1: Boolean): this.type = this
-    def setPerformancePreferences(x$1: Int,x$2: Int,x$3: Int): this.type = this
-    def setReceiveBufferSize(x$1: Int): this.type = this
-    def setReuseAddress(x$1: Boolean): this.type = this
-    def setSendBufferSize(x$1: Int): this.type = this
-    def setSoLinger(x$1: Int): this.type = this
-    def setTcpNoDelay(x$1: Boolean): this.type = this
-    def setTrafficClass(x$1: Int): this.type = this
+    def getReceiveBufferSize(): Int = receiveBufferSize
+
+    def getSendBufferSize(): Int = sendBufferSize
+
+    def getSoLinger(): Int = soLinger
+
+    def getTrafficClass(): Int = trafficClass
+
+    def isAllowHalfClosure(): Boolean = allowHalfClosure
+
+    def isKeepAlive(): Boolean = keepAlive
+
+    def isReuseAddress(): Boolean = reuseAddress
+
+    def isTcpNoDelay(): Boolean = tcpNoDelay
+
+    def setAllowHalfClosure(x: Boolean): this.type = {
+        allowHalfClosure = x
+        this
+    }
+
+    def setKeepAlive(x: Boolean): this.type = {
+        allowHalfClosure = x
+        this
+    }
+
+    def setPerformancePreferences(x1: Int, x2: Int, x3: Int): this.type = {
+        performancePreferences = Array(x1, x2, x3)
+        this
+    }
+
+    def setReceiveBufferSize(x: Int): this.type = {
+        receiveBufferSize = x
+        this
+    }
+
+    def setReuseAddress(x: Boolean): this.type = {
+        reuseAddress = x
+        this
+    }
+
+    def setSendBufferSize(x: Int): this.type = {
+        sendBufferSize = x
+        this
+    }
+
+    def setSoLinger(x: Int): this.type = {
+        soLinger = x
+        this
+    }
+
+    def setTcpNoDelay(x: Boolean): this.type = {
+        tcpNoDelay = x
+        this
+    }
+
+    def setTrafficClass(x: Int): this.type = {
+        trafficClass = x
+        this
+    }
+
+
+    private var receiveBufferSize = 0
+    private var sendBufferSize = 0
+    private var soLinger = 0
+    private var trafficClass = 0
+    private var allowHalfClosure = true
+    private var keepAlive = false
+    private var reuseAddress = true
+    private var tcpNoDelay = false
+    private var performancePreferences = Array(0, 0, 0)
 }

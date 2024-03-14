@@ -11,7 +11,7 @@ import io.netty.channel.EventLoopGroup
 import io.netty.channel.EventLoopTaskQueueFactory
 import io.netty.channel.SelectStrategy
 import io.netty.channel.SingleThreadEventLoop
-import io.netty.channel.unix.IovArray
+// import io.netty.channel.unix.IovArray
 import io.netty.util.IntSupplier
 import io.netty.util.collection.IntObjectHashMap
 import io.netty.util.collection.IntObjectMap
@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 object UcxAmId {
     final val CONNECT = 0
-    final val REPLY_CONNECT = 1
+    final val CONNECT_ACK = 1
     final val MESSAGE = 2
 }
 
@@ -49,6 +49,7 @@ class UcxEventLoop(
         UcxEventLoop.newTaskQueue(queueFactory),
         UcxEventLoop.newTaskQueue(queueFactory),
         rejectedExecutionHandler) with UcxLogging {
+    logDev(s"UcxEventLoop() parent $parent executor $executor maxEvents $maxEvents")
 
     private val ucxChannels = new ConcurrentHashMap[Long, AbstractUcxChannel]
 
@@ -68,21 +69,24 @@ class UcxEventLoop(
             new UcpAmRecvCallback {
                 override def onReceive(
                     headerAddress: Long, headerSize: Long, amData: UcpAmData,
-                    epIn: UcpEndpoint): Int = {
+                    ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
                         val address = UnsafeUtils.getByteBufferView(amData.getDataAddress, amData.getLength.toInt)
-                        val nativeId = epIn.getNativeId()
+                        val copiedAddress = ByteBuffer.allocateDirect(address.remaining())
+                        val nativeId = ep.getNativeId()
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(nativeId)
 
-                        channel.ucxConnectBack(remoteId, address)
+                        logDev(s"ucxHandleConnect() id $remoteId address $address")
+                        copiedAddress.put(address)
+                        channel.ucxHandleConnect(remoteId, copiedAddress)
                         UcsConstants.STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
 
         ucpWorker.setAmRecvHandler(
-            UcxAmId.REPLY_CONNECT,
+            UcxAmId.CONNECT_ACK,
             new UcpAmRecvCallback {
                 override def onReceive(
                     headerAddress: Long, headerSize: Long,
@@ -92,7 +96,8 @@ class UcxEventLoop(
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxConnectDone(remoteId)
+                        logDev(s"ucxHandleConnectAck() id $remoteId ep $ep")
+                        channel.ucxHandleConnectAck(remoteId, ep)
                         UcsConstants.STATUS.UCS_OK
                     }
             },
@@ -261,7 +266,8 @@ class UcxEventLoop(
     protected def wakeup(inEventLoop: Boolean): Unit = {
         if (!inEventLoop && nextWakeupNanos.getAndSet(AWAKE) != AWAKE) {
             // write to the evfd which will then wake-up epoll_wait(...)
-            NativeEpoll.eventFdWrite(eventFd, 1L)
+            // NativeEpoll.eventFdWrite(eventFd, 1L)
+            ucpWorker.signal()
         }
     }
 
@@ -426,8 +432,6 @@ class UcxEventLoop(
 
                 if (isShuttingDown()) {
                     closeAll()
-                    UcxEventLoop.localWorker.set(null)
-                    ucpWorker.close()
                     if (confirmShutdown()) {
                         return
                     }
@@ -457,7 +461,11 @@ class UcxEventLoop(
         // Using the intermediate collection to prevent ConcurrentModificationException.
         // In the `close()` method, the channel is deleted from `channels` map.
         channels.values.foreach(_.close())
-        ucpWorker.close()
+        if (ucpWorker != null) {
+            UcxEventLoop.localWorker.set(null)
+            ucpWorker.close()
+            ucpWorker = null
+        }
     }
 
     // Returns true if a timerFd event was encountered

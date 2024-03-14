@@ -105,7 +105,7 @@ class Client(
             .handler(new ChannelInitializer[SocketChannel]() {
                 override
                 protected def initChannel(channel: SocketChannel) = {
-                    channel.pipeline().addLast(new Handler())
+                    channel.pipeline().addLast("echo", new Handler())
                 }
             })
 
@@ -115,7 +115,9 @@ class Client(
                 while (scanner.hasNextLine()) {
                     try {
                         val line = scanner.nextLine()
-                        channel.writeAndFlush(Unpooled.copiedBuffer(line, StandardCharsets.UTF_8)).sync()
+                        val msg = Unpooled.copiedBuffer(line, StandardCharsets.UTF_8)
+                        LOGGER.debug("[input] {}", msg)
+                        channel.writeAndFlush(msg).sync()
                     } catch {
                         case e: InterruptedException =>
                         LOGGER.error("A sync error occurred", e)
@@ -159,7 +161,7 @@ class Server(bindAddress: InetSocketAddress) extends Runnable {
                     protected def initChannel(channel: SocketChannel) = {
                         val listener = newListener(_ => LOGGER.info("Socket channel closed"))
                         channel.closeFuture().addListener(listener)
-                        channel.pipeline().addLast(new Handler())
+                        channel.pipeline().addLast("echo", new Handler())
                     }
                 })
 
@@ -199,6 +201,11 @@ class Handler extends ChannelInboundHandlerAdapter {
     }
 
     override
+    def channelReadComplete(context: ChannelHandlerContext) = {
+        context.flush();
+    }
+
+    override
     def channelRead(context: ChannelHandlerContext, message: Object) = {
         val buffer = message.asInstanceOf[ByteBuf]
         val bytes = new Array[Byte](buffer.readableBytes())
@@ -213,7 +220,7 @@ class Handler extends ChannelInboundHandlerAdapter {
 
         if (context.channel().parent() != null) {
             val listener = newListener(_ => LOGGER.info("Echo reply sent"))
-            context.writeAndFlush(Unpooled.copiedBuffer(string, StandardCharsets.UTF_8)).addListener(listener)
+            context.write(Unpooled.copiedBuffer(string, StandardCharsets.UTF_8)).addListener(listener)
         }
     }
 

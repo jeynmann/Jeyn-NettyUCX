@@ -21,6 +21,11 @@ trait UcxLogging {
   }
 
   // Log methods that take only a String
+  @inline
+  protected def logDev(msg: => String) {
+    logTrace(msg)
+  }
+
   protected def logInfo(msg: => String) {
     if (log.isInfoEnabled) log.info(msg)
   }
@@ -60,5 +65,9 @@ trait UcxLogging {
 
   protected def logError(msg: => String, throwable: Throwable) {
     if (log.isErrorEnabled) log.error(msg, throwable)
+  }
+
+  protected def logDev(msg: => String, throwable: Throwable) {
+    log.info(msg, throwable)
   }
 }

@@ -10,7 +10,6 @@ import io.netty.util.concurrent.EventExecutorChooserFactory
 import io.netty.util.concurrent.RejectedExecutionHandler
 import io.netty.util.concurrent.RejectedExecutionHandlers
 import io.netty.util.concurrent.DefaultEventExecutorChooserFactory
-import io.netty.channel.epoll.Epoll
 
 import java.util.concurrent.Executor
 import java.util.concurrent.ThreadFactory
@@ -30,7 +29,8 @@ class UcxEventLoopGroup(
     private[ucx] val ucpContext: UcpContext = new UcpContext(UcxEventLoopGroup.ucpParams))
     extends MultithreadEventLoopGroup(
         nThreads, executor, chooserFactory, 0.asInstanceOf[Object], selectStrategyFactory,
-        rejectedExecutionHandler, queueFactory) {
+        rejectedExecutionHandler, queueFactory) with UcxLogging {
+    logDev(s"UcxEventLoopGroup() nThreads $nThreads executor $executor chooserFactory $chooserFactory")
 
     def this(nThreads: Int, executor: Executor,
              selectFactory: SelectStrategyFactory ) {
@@ -39,6 +39,7 @@ class UcxEventLoopGroup(
 
     override
     protected def newChild(executor: Executor, args: Object*): EventLoop = {
+        logDev(s"newChild() executor $executor args $args")
         return new UcxEventLoop(this, executor, args(0).asInstanceOf[Int],
                 args(1).asInstanceOf[SelectStrategyFactory].newSelectStrategy(),
                 args(2).asInstanceOf[RejectedExecutionHandler],
@@ -48,7 +49,6 @@ class UcxEventLoopGroup(
 
 object UcxEventLoopGroup {
     final val loadNative = {
-        Epoll.ensureAvailability()
         NativeLibs.load()
         true
     }

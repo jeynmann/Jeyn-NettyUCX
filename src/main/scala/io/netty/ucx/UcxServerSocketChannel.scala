@@ -34,7 +34,7 @@ class UcxServerSocketChannel(parent: Channel)
     def ucxUnsafe: AbstractUcxUnsafe = underlyingUnsafe
 
     override
-    def config() = ucxServerConfig
+    def config(): UcxServerSocketChannelConfig = ucxServerConfig
 
     override
     def remoteAddress(): InetSocketAddress = super.remoteAddress().asInstanceOf[InetSocketAddress]

@@ -17,7 +17,6 @@ import io.netty.channel.ChannelPromise
 import io.netty.channel.ChannelOutboundBuffer
 import io.netty.channel.ChannelException
 import io.netty.channel.FileRegion
-import io.netty.channel.socket.DuplexChannel
 import io.netty.channel.socket.SocketChannel
 import io.netty.util.concurrent.GlobalEventExecutor
 
@@ -60,7 +59,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     def ucxUnsafe: AbstractUcxUnsafe = underlyingUnsafe
 
     override
-    def config() = ucxSocketConfig
+    def config(): UcxSocketChannelConfig = ucxSocketConfig
 
     override
     def remoteAddress(): InetSocketAddress = super.remoteAddress().asInstanceOf[InetSocketAddress]
@@ -273,8 +272,9 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
             val readCb = new UcxCallback() {
                 override def onSuccess(r: UcpRequest): Unit = {
+                    directBuf.writerIndex(readableBytes)
                     pipe.fireChannelRead(directBuf).fireChannelReadComplete()
-                    logTrace(s"Read MESSAGE from $remote success")
+                    logTrace(s"Read MESSAGE from $remote success: $directBuf")
                 }
                 override def onError(status: Int, errorMsg: String): Unit = {
                     val e = new UcxException(s"Read MESSAGE from $remote fail: $errorMsg", status)
@@ -445,7 +445,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             if (buf.hasMemoryAddress()) {
                 address = buf.memoryAddress()
             } else if (buf.nioBufferCount() == 1) {
-                address = UnsafeUtils.getAddress(buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes()))
+                address = UnsafeUtils.getAddress(buf.internalNioBuffer(buf.writerIndex(), buf.writableBytes()))
             } else {
                 throw new UnsupportedOperationException(s"buf count ${buf.nioBufferCount()} > 1")
             }
@@ -580,7 +580,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         override
         def setUcpAddress(address: ByteBuffer): Unit = {
             actionEpParam = new UcpEndpointParams().setUcpAddress(address)
-                .setPeerErrorHandlingMode()
                 .setErrorHandler(ucpErrHandler)
                 .setName(s"ActionEp to ${remote}")
             actionEpAddress = address
@@ -613,17 +612,17 @@ private[ucx] class UcxWritableByteChannel(
 
     def write(src: ByteBuffer): Int = {
         val dup = src.duplicate()
-        val position = dup.position()
+        val readableBytes = dup.remaining()
+        if (readableBytes > size) {
+            dup.limit(dup.position() + size)
+        }
 
-        dup.limit(position + size)
-
-        val before = directBuf.writerIndex()
         directBuf.writeBytes(dup)
-        val after = directBuf.writerIndex()
-        val written = after - before
 
-        logDev(s"write() $dup $before $after")
-        src.position(position + written)
+        val written = readableBytes - dup.remaining()
+        src.position(dup.position())
+
+        logDev(s"write() $dup $src $written")
         return written
     }
 

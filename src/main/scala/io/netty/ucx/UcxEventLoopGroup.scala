@@ -6,6 +6,7 @@ import io.netty.channel.EventLoopGroup
 import io.netty.channel.EventLoopTaskQueueFactory
 import io.netty.channel.MultithreadEventLoopGroup
 import io.netty.channel.SelectStrategyFactory
+import io.netty.util.concurrent.ThreadPerTaskExecutor
 import io.netty.util.concurrent.EventExecutorChooserFactory
 import io.netty.util.concurrent.RejectedExecutionHandler
 import io.netty.util.concurrent.RejectedExecutionHandlers
@@ -33,8 +34,17 @@ class UcxEventLoopGroup(
     logDev(s"UcxEventLoopGroup() nThreads $nThreads executor $executor chooserFactory $chooserFactory")
 
     def this(nThreads: Int, executor: Executor,
-             selectFactory: SelectStrategyFactory ) {
+             selectFactory: SelectStrategyFactory) = {
         this(nThreads, executor, selectStrategyFactory = selectFactory)
+    }
+
+    def this(nThreads: Int, threadFactory: ThreadFactory) = {
+        this(nThreads, new ThreadPerTaskExecutor(threadFactory))
+    }
+
+    def this(nThreads: Int, threadFactory: ThreadFactory,
+             selectFactory: SelectStrategyFactory) = {
+        this(nThreads, new ThreadPerTaskExecutor(threadFactory), selectFactory)
     }
 
     override

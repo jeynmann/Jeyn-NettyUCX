@@ -130,12 +130,12 @@ class UcxRecvByteAllocatorHandle(handle: ExtendedHandle)
     final def allocate(alloc: ByteBufAllocator): ByteBuf = {
         // We need to ensure we always allocate a direct ByteBuf as we can only use a direct buffer to read via JNI.
         preferredDirectByteBufAllocator.updateAllocator(alloc)
-        return extendedHandle.allocate(preferredDirectByteBufAllocator)
+        return handle.allocate(preferredDirectByteBufAllocator)
     }
 
     override
     final def continueReading(maybeMoreDataSupplier: UncheckedBooleanSupplier): Boolean = {
-        return extendedHandle.continueReading(maybeMoreDataSupplier)
+        return handle.continueReading(maybeMoreDataSupplier)
     }
 
     override
@@ -143,6 +143,4 @@ class UcxRecvByteAllocatorHandle(handle: ExtendedHandle)
         // TODO: maybe more data to read
         return continueReading(defaultMaybeMoreDataSupplier)
     }
-
-    def extendedHandle = delegate().asInstanceOf[ExtendedHandle]
 }

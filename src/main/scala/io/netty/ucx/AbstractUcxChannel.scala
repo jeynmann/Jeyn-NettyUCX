@@ -96,10 +96,10 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         eventLoopRun(ucxUnsafe.doConnectedBack0 _)
     }
 
-    def ucxHandleConnectAck(remoteId: Long, endpoint: UcpEndpoint): Unit = {
+    def ucxHandleConnectAck(remoteId: Long, address: ByteBuffer): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
-        ucxUnsafe.setActionEp(endpoint)
-        ucxUnsafe.doConnectDone()
+        ucxUnsafe.setUcpAddress(address)
+        eventLoopRun(ucxUnsafe.doConnectDone0 _) // TODO rm eventLoopRun
     }
 
     override
@@ -288,7 +288,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             throw new UnsupportedOperationException()
         }
 
-        def doConnectDone(): Unit = {
+        def doConnectDone0(): Unit = {
             throw new UnsupportedOperationException()
         }
 

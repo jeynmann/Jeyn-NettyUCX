@@ -477,11 +477,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                         }
                         override def onError(status: Int, errorMsg: String): Unit = {
                             // TODO raise error
-                            opened = false
-                            val e = new UcxException(s"$local CONNECT $remote: $errorMsg", status)
-                            if (connectPromise != null && connectPromise.tryFailure(e)) {
-                                close(voidPromise())
-                            }
+                            connectFailed(status, s"$local CONNECT $remote: $errorMsg")
                             workerAddress.clear()
                             header.clear()
                         }
@@ -504,25 +500,24 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 val headerSize = UnsafeUtils.LONG_SIZE + UnsafeUtils.LONG_SIZE
                 val header = ByteBuffer.allocateDirect(headerSize)
                 val headerAddress = UnsafeUtils.getAddress(header)
+                val workerAddress = ucpWorker.getAddress()
 
                 header.putLong(remoteId.get())
                 header.putLong(uniqueId.get())
 
                 logDev(s"$local CONNECT_ACK $remote: ongoing")
                 actionEp.sendAmNonBlocking(
-                    UcxAmId.CONNECT_ACK, headerAddress, headerSize, headerAddress, 0,
+                    UcxAmId.CONNECT_ACK, UnsafeUtils.getAddress(header), headerSize,
+                    UnsafeUtils.getAddress(workerAddress), workerAddress.remaining(),
                     UcpConstants.UCP_AM_SEND_FLAG_EAGER | UcpConstants.UCP_AM_SEND_FLAG_REPLY,
                     new UcxCallback() {
                         override def onSuccess(request: UcpRequest): Unit = {
-                            doConnectDone()
+                            connectSuccess()
                             logDebug(s"$local CONNECT_ACK $remote: success")
                         }
                         override def onError(status: Int, errorMsg: String): Unit = {
-                            opened = false
-                            val e = new UcxException(s"$local CONNECT_ACK $remote: $errorMsg")
-                            if (connectPromise != null && connectPromise.tryFailure(e)) {
-                                close(voidPromise())
-                            }
+                            connectFailed(status, s"$local CONNECT_ACK $remote: $errorMsg")
+                            workerAddress.clear()
                             header.clear()
                         }
                     }, MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
@@ -535,7 +530,27 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
 
         override
-        def doConnectDone(): Unit = {
+        def doConnectDone0(): Unit = {
+            try {
+                actionEp = ucpWorker.newEndpoint(actionEpParam)
+                connectSuccess()
+            } catch {
+                case e: Throwable => {
+                    connectFailed(UcsConstants.STATUS.UCS_ERR_IO_ERROR,
+                                  s"$local HANDLE_ACK $remote: $e")
+                }
+            }
+        }
+
+        private def connectFailed(status: Int, errorMsg: String): Unit = {
+            opened = false
+            val e = new UcxException(errorMsg, status)
+            if (connectPromise != null && connectPromise.tryFailure(e)) {
+                close(voidPromise())
+            }
+        }
+
+        private def connectSuccess(): Unit = {
             finishConnect(remote)
 
             bInputShutdown = false

@@ -89,15 +89,18 @@ class UcxEventLoop(
             UcxAmId.CONNECT_ACK,
             new UcpAmRecvCallback {
                 override def onReceive(
-                    headerAddress: Long, headerSize: Long,
-                    ucpAmData: UcpAmData, ep: UcpEndpoint): Int = {
+                    headerAddress: Long, headerSize: Long, amData: UcpAmData,
+                    ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
+                        val address = UnsafeUtils.getByteBufferView(amData.getDataAddress, amData.getLength.toInt)
+                        val copiedAddress = ByteBuffer.allocateDirect(address.remaining())
                         val uniqueId = header.getLong
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        logDev(s"ucxHandleConnectAck() id $remoteId ep $ep")
-                        channel.ucxHandleConnectAck(remoteId, ep)
+                        logDev(s"ucxHandleConnectAck() id $remoteId address $address")
+                        copiedAddress.put(address)
+                        channel.ucxHandleConnectAck(remoteId, copiedAddress)
                         UcsConstants.STATUS.UCS_OK
                     }
             },
@@ -107,13 +110,13 @@ class UcxEventLoop(
             UcxAmId.MESSAGE,
             new UcpAmRecvCallback {
                 override def onReceive(
-                    headerAddress: Long, headerSize: Long,
-                    ucpAmData: UcpAmData, ep: UcpEndpoint): Int = {
+                    headerAddress: Long, headerSize: Long, amData: UcpAmData,
+                    ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
                         val uniqueId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxRead(ucpAmData)
+                        channel.ucxRead(amData)
                         UcsConstants.STATUS.UCS_OK
                     }
             },

@@ -125,28 +125,28 @@ class UcxEventLoop(
     /**
      * Register the given channel with this {@link EventLoop}.
      */
-    def addChannel(ch: AbstractUcxChannel): Unit = {
+    def addChannel(ch: AbstractUcxChannel): AbstractUcxChannel = {
         addChannel(ch.ucxUnsafe.uniqueId.get, ch)
     }
 
     /**
      * Register the given channel with this {@link EventLoop}.
      */
-    def addChannel(id: Long, ch: AbstractUcxChannel): Unit = {
+    def addChannel(id: Long, ch: AbstractUcxChannel): AbstractUcxChannel = {
         ucxChannels.putIfAbsent(id, ch)
     }
 
     /**
      * Deregister the given channel from this {@link EventLoop}.
      */
-    def delChannel(ch: AbstractUcxChannel): Unit = {
+    def delChannel(ch: AbstractUcxChannel): AbstractUcxChannel = {
         delChannel(ch.ucxUnsafe.uniqueId.get)
     }
 
     /**
      * Deregister the given channel from this {@link EventLoop}.
      */
-    def delChannel(id: Long): Unit = {
+    def delChannel(id: Long): AbstractUcxChannel = {
         ucxChannels.remove(id)
     }
 

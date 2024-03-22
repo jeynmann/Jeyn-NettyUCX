@@ -2,6 +2,7 @@
 package io.netty.channel.ucx
 
 import org.openucx.jucx.ucp._
+import org.openucx.jucx.ucs.UcsConstants
 
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFuture
@@ -90,8 +91,13 @@ class UcxServerSocketChannel(parent: Channel)
 
         val ucpErrHandler = new UcpEndpointErrorHandler() {
             override def onError(ep: UcpEndpoint, status: Int, errorMsg: String): Unit = {
-                logError(s"$ep: $errorMsg")
-                ucxEventLoop.delChannel(ep.getNativeId())
+                if (status == UcsConstants.STATUS.UCS_ERR_CONNECTION_RESET) {
+                    logInfo(s"$ep: $errorMsg")
+                } else {
+                    logWarning(s"$ep: $errorMsg")
+                }
+                Option(ucxEventLoop.delChannel(ep.getNativeId())).foreach(ch =>
+                    ch.ucxUnsafe.close(ch.ucxUnsafe.voidPromise()))
             }
         }
         val ucpEpParam = new UcpEndpointParams()

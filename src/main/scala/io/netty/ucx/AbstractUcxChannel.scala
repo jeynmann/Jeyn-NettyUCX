@@ -90,16 +90,16 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     def ucxRead(ucpAmData: UcpAmData): Unit = doReadAmData(ucpAmData)
 
-    def ucxHandleConnect(remoteId: Long, address: ByteBuffer): Unit = {
+    def ucxHandleConnect(ep: UcpEndpoint, remoteId: Long, address: ByteBuffer): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
         ucxUnsafe.setUcpAddress(address)
         eventLoopRun(ucxUnsafe.doConnectedBack0 _)
     }
 
-    def ucxHandleConnectAck(remoteId: Long, address: ByteBuffer): Unit = {
+    def ucxHandleConnectAck(ep: UcpEndpoint, remoteId: Long, address: ByteBuffer): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
-        ucxUnsafe.setUcpAddress(address)
-        eventLoopRun(ucxUnsafe.doConnectDone0 _) // TODO rm eventLoopRun
+        ucxUnsafe.setActionEp(ep)
+        ucxUnsafe.doConnectDone0()
     }
 
     override
@@ -118,12 +118,11 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     protected def newUnsafe(): AbstractUnsafe = ???
 
     protected abstract class AbstractUcxUnsafe extends AbstractUnsafe {
-        val uniqueId = new NettyUcxId()
-        val remoteId = new NettyUcxId()
+        protected[ucx] val uniqueId = new NettyUcxId()
+        protected[ucx] val remoteId = new NettyUcxId()
+        protected[ucx] var allocHandle: UcxRecvByteAllocatorHandle = _
 
         protected[ucx] def ucpWorker = ucxEventLoop.ucpWorker
-
-        protected var allocHandle: UcxRecvByteAllocatorHandle = _
 
         override
         def recvBufAllocHandle(): UcxRecvByteAllocatorHandle = {
@@ -295,6 +294,14 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         def doClose0(): Unit = {
             throw new UnsupportedOperationException()
         }
+
+        def connectFailed(status: Int, errorMsg: String): Unit = {
+            throw new UnsupportedOperationException()
+        }
+
+        def connectSuccess(): Unit = {
+            throw new UnsupportedOperationException()
+        }
     }
 
     override
@@ -385,5 +392,5 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
 object AbstractUcxChannel {
     final val METADATA = new ChannelMetadata(false)
-    final val SNDBUF_FULL = Integer.MAX_VALUE // TODO: ???
+    final val SNDBUF_FULL = -1 // TODO: ???
 }

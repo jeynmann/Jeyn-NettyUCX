@@ -48,7 +48,9 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
     protected lazy val flushOut = new Runnable() {
         override
-        def run(): Unit = underlyingUnsafe.flush0()
+        def run(): Unit = {
+            underlyingUnsafe.flush0()
+        }
     }
 
     def this() = {
@@ -72,49 +74,46 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
     override
     protected def doConnect(remoteAddress: SocketAddress, localAddress: SocketAddress): Unit = {
+        assert(eventLoop().inEventLoop())
         logDev(s"doConnect() $localAddress -> $remoteAddress")
 
         ucxUnsafe.setSocketAddress(remoteAddress.asInstanceOf[java.net.InetSocketAddress])
-
-        eventLoopRun(() => ucxUnsafe.doConnect0())
+        ucxUnsafe.doConnect0()
     }
 
     override
     protected def doWrite(in: ChannelOutboundBuffer): Unit = {
         logDev(s"doWrite() $in")
-        var writeSpinCount = config().getWriteSpinCount()
-        do {
-            val msgCount = in.size()
-            // Do gathering write if the outbound buffer entries start with more than one ByteBuf.
-            if (msgCount == 0) {
-                return
-            } else if (msgCount > 1 && in.current().isInstanceOf[ByteBuf]) {
-                writeSpinCount -= doWriteMultiple(in)
-            } else {  // msgCount == 1
-                writeSpinCount -= doWriteSingle(in)
-            }
 
-            // We do not break the loop here even if the outbound buffer was flushed completely,
-            // because a user might have triggered another write and flush when we notify his or her
-            // listeners.
-        } while (writeSpinCount > 0)
-
-        if (writeSpinCount == 0) {
-            // We used our writeSpin quantum, and should try to write again later.
-            eventLoop().execute(flushOut)
-        } else {
-            // Underlying descriptor can not accept all data currently
-            // TODO: ???
+        val msgCount = in.size()
+        // Do gathering write if the outbound buffer entries start with more than one ByteBuf.
+        if (msgCount == 0) {
+            in.remove()
+        } else if (msgCount > 1) {
+            doWriteMultiple(in, msgCount)
+        } else {  // msgCount == 1
+            doWriteSingle(in)
         }
     }
 
-    private def doWriteMultiple(in: ChannelOutboundBuffer): Int = {
+    private def doWriteMultiple(in: ChannelOutboundBuffer, msgCount: Int): Int = {
         // TODO: Am doesn't support IOV yet.
-        var num = 0
-        while (in.size() > 0) {
-            num += doWriteSingle(in)
-        }
-        return num
+        var totalNum = 0
+        var writeNum = 0
+
+        do {
+            writeNum = doWriteSingle(in)
+
+            if (writeNum == AbstractUcxChannel.SNDBUF_FULL) {
+                eventLoop().execute(flushOut);
+                return writeNum
+            }
+
+            totalNum += writeNum
+        } while (totalNum < msgCount)
+
+
+        return msgCount
     }
 
     protected def doWriteSingle(in: ChannelOutboundBuffer): Int = {
@@ -124,7 +123,8 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         case buf: ByteBuf =>
             return writeBytes(in, buf)
         case fr: FileRegion =>
-            return writeFileRegion(in, fr)
+            while (writeFileRegion(in, fr) == 0) {}
+            return 1
         // TODO: support ucx registered memory
         // case msg: UcxMemory => return writeUcpMemory(in, (FileRegion) msg)
         case _ =>
@@ -139,25 +139,30 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         val regionCount = region.count()
         if (offset >= regionCount) {
             in.remove()
-            return 0
+            return 1
         }
 
         // TODO: read file limit
-        val maxWrite = 16 * 1024 * 1024
+        val maxWrite = 16 << 20
         val toWrite = (regionCount - offset).toInt.min(maxWrite)
         var byteChannel: UcxWritableByteChannel = null
         try {
             byteChannel = new UcxWritableByteChannel(config().getAllocator(), toWrite)
-            val flushedAmount = region.transferTo(byteChannel, offset)   
+            val flushedAmount = region.transferTo(byteChannel, offset)
 
             if (flushedAmount > 0) {  
-                val doneCb = byteChannel.close _
                 val buf = byteChannel.internalByteBuf()       
+                val writeFileCb = newWriteFileCb(byteChannel)
 
                 if (buf.hasMemoryAddress() || buf.nioBufferCount() == 1) {
-                    return doWriteBytes(in, buf, doneCb)
+                    doWriteBytes(in, buf, writeFileCb)
                 } else {
-                    return doWriteBytesMultiple(in, buf, doneCb)
+                    doWriteBytesMultiple(in, buf, writeFileCb)
+                }
+
+                if (region.transferred() >= regionCount) {
+                    in.remove();
+                    return 1
                 }
             }
         } catch {
@@ -168,70 +173,90 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 throw t
             }
         }
-        return AbstractUcxChannel.SNDBUF_FULL
+
+        return 0
     }
 
     private def writeBytes(in: ChannelOutboundBuffer, buf: ByteBuf): Int = {
         if (buf.readableBytes() == 0) {
             in.remove()
-            return 0
+            return 1
         }
 
-        if (buf.hasMemoryAddress() || buf.nioBufferCount() == 1) {
-            return doWriteBytes(in, buf, () => {})
+        // duplicate to use readerIndex mark sending position.
+        val writeBuf = buf.duplicate()
+        val writeCb = newWriteBytesCb(in, writeBuf)
+        if (writeBuf.hasMemoryAddress() || writeBuf.nioBufferCount() == 1) {
+            doWriteBytes(in, writeBuf, writeCb)
         } else {
-            return doWriteBytesMultiple(in, buf, () => {})
+            doWriteBytesMultiple(in, writeBuf, writeCb)
         }
+
+        while (writeBuf.readableBytes() != 0) {
+            underlyingUnsafe.ucpWorker.progress()
+        }
+
+        in.removeBytes(buf.readableBytes())
+        return 1
     }
 
     private def doWriteBytesMultiple(in: ChannelOutboundBuffer, buf: ByteBuf,
-                                     doneCb: () => Unit): Int = {
+                                     writeCb: UcxCallback): Int = {
         // TODO: support iov
         val nioBuffers = buf.nioBuffers()
 
         for (nioBuf <- nioBuffers) {
-            val flushedAmount = nioBuf.limit() - nioBuf.position()
-            val writeCb = doWriteBytesCb(in, buf, flushedAmount, doneCb)
-
-            eventLoopRun(() => underlyingUnsafe.doWrite0(nioBuf, writeCb))
+            underlyingUnsafe.doWrite0(nioBuf, writeCb)
         }
 
         return 1
     }
 
     private def doWriteBytes(in: ChannelOutboundBuffer, buf: ByteBuf,
-                             doneCb: () => Unit): Int = {
+                             writeCb: UcxCallback): Int = {
         if (buf.hasMemoryAddress()) {
-            val flushedAmount = buf.writerIndex() - buf.readerIndex()
-            val writeCb = doWriteBytesCb(in, buf, flushedAmount, doneCb)
-
-            eventLoopRun(() => underlyingUnsafe.doWrite0(
-                buf.memoryAddress(), buf.readerIndex(), buf.writerIndex(), writeCb))
+            underlyingUnsafe.doWrite0(buf.memoryAddress(), buf.readerIndex(),
+                                      buf.writerIndex(), writeCb)
         } else { // buf.nioBufferCount() == 1
             val nioBuf = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
 
-            val flushedAmount = nioBuf.limit() - nioBuf.position()
-            val writeCb = doWriteBytesCb(in, buf, flushedAmount, doneCb)
-
-            eventLoopRun(() => underlyingUnsafe.doWrite0(nioBuf, writeCb))
+            underlyingUnsafe.doWrite0(nioBuf, writeCb)
         }
 
         return 1
     }
 
-    private def doWriteBytesCb(in: ChannelOutboundBuffer, buf: ByteBuf,
-                               flushedAmount: Int, doneCb: () => Unit): UcxCallback = {
+    private def newWriteFileCb(ch: UcxWritableByteChannel):
+        UcxCallback = {
         new UcxCallback() {
+            var refCounts = ch.internalByteBuf().nioBufferCount()
+
             override def onSuccess(request: UcpRequest): Unit = {
-                in.removeBytes(flushedAmount)
-                if (buf.readableBytes() == 0) {
-                    in.remove()
+                refCounts -= 1
+                if (refCounts == 0) {
+                    ch.close()
+                    logTrace(s"$local MESSAGE $remote: success")
                 }
-                doneCb()
-                logTrace(s"$local MESSAGE $remote: success")
             }
             override def onError(status: Int, errorMsg: String): Unit = {
-                doneCb()
+                ch.close()
+                throw new UcxException(s"$local MESSAGE $remote: $errorMsg", status)
+            }
+        }
+    }
+
+    private def newWriteBytesCb(in: ChannelOutboundBuffer, buf: ByteBuf): UcxCallback = {
+        new UcxCallback() {
+            var refCounts = buf.nioBufferCount()
+
+            override def onSuccess(request: UcpRequest): Unit = {
+                refCounts -= 1
+                if (refCounts == 0) {
+                    buf.readerIndex(buf.writerIndex)
+                    logTrace(s"$local MESSAGE $remote: success")
+                }
+            }
+            override def onError(status: Int, errorMsg: String): Unit = {
                 throw new UcxException(s"$local MESSAGE $remote: $errorMsg", status)
             }
         }
@@ -273,7 +298,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             val readCb = new UcxCallback() {
                 override def onSuccess(r: UcpRequest): Unit = {
                     directBuf.writerIndex(readableBytes)
-                    pipe.fireChannelRead(directBuf).fireChannelReadComplete()
+                    pipe.fireChannelRead(directBuf)
                     logTrace(s"Read MESSAGE from $remote success: $directBuf")
                 }
                 override def onError(status: Int, errorMsg: String): Unit = {
@@ -429,7 +454,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         private[ucx] def doWrite0(address: Long, offset: Int, limit: Int, writeCb: UcxCallback): Int = {
             val header = remoteId.directBuffer()
 
-            logDev(s"$local MESSAGE $remote: ongoing")
+            logDev(s"$local MESSAGE $remote: ongoing($address $offset $limit)")
             actionEp.sendAmNonBlocking(
                 UcxAmId.MESSAGE,
                 UnsafeUtils.getAddress(header), header.remaining(),
@@ -531,32 +556,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
         override
         def doConnectDone0(): Unit = {
-            try {
-                actionEp = ucpWorker.newEndpoint(actionEpParam)
-                connectSuccess()
-            } catch {
-                case e: Throwable => {
-                    connectFailed(UcsConstants.STATUS.UCS_ERR_IO_ERROR,
-                                  s"$local HANDLE_ACK $remote: $e")
-                }
-            }
-        }
-
-        private def connectFailed(status: Int, errorMsg: String): Unit = {
-            opened = false
-            val e = new UcxException(errorMsg, status)
-            if (connectPromise != null && connectPromise.tryFailure(e)) {
-                close(voidPromise())
-            }
-        }
-
-        private def connectSuccess(): Unit = {
-            finishConnect(remote)
-
-            bInputShutdown = false
-            bOutputShutdown = false
- 
-            logDebug(s"connected $local <-> $remote")
+            connectSuccess()
         }
 
         override
@@ -611,6 +611,25 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             remote = endpoint.getRemoteAddress()
             local = endpoint.getLocalAddress()
             ucpEp = endpoint
+        }
+
+        override
+        def connectFailed(status: Int, errorMsg: String): Unit = {
+            opened = false
+            val e = new UcxException(errorMsg, status)
+            if (connectPromise != null && connectPromise.tryFailure(e)) {
+                close(voidPromise())
+            }
+        }
+
+        override
+        def connectSuccess(): Unit = {
+            underlyingUnsafe.finishConnect(remote)
+
+            bInputShutdown = false
+            bOutputShutdown = false
+
+            logDebug(s"connected $local <-> $remote")
         }
     }
 }

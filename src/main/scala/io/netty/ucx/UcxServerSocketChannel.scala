@@ -137,13 +137,18 @@ class UcxServerSocketChannel(parent: Channel)
         override
         def doAccept0(): Unit = {
             val childChannel = newChildChannel()
-            val ep = ucpWorker.newEndpoint(ucpEpParam)
+            try {
+                val ep = ucpWorker.newEndpoint(ucpEpParam)
 
-            childChannel.ucxUnsafe.setUcpEp(ep)
-            ucxEventLoop.addChannel(ep.getNativeId(), childChannel)
-            pipeline.fireChannelRead(childChannel)
+                childChannel.ucxUnsafe.setUcpEp(ep)
+                ucxEventLoop.addChannel(ep.getNativeId(), childChannel)
+                pipeline.fireChannelRead(childChannel)
 
-            logDebug(s"accept $local <- $remote")
+                logDebug(s"accept $local <- $remote")
+            } catch {
+                case e: Throwable => childChannel.ucxUnsafe.connectFailed(
+                    UcsConstants.STATUS.UCS_ERR_IO_ERROR, "accept $local <- $remote: $e")
+            }
         }
 
         override

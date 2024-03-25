@@ -79,7 +79,7 @@ class UcxEventLoop(
 
                         logDev(s"ucxHandleConnect() id $remoteId address $address")
                         copiedAddress.put(address)
-                        channel.ucxHandleConnect(remoteId, copiedAddress)
+                        channel.ucxHandleConnect(ep, remoteId, copiedAddress)
                         UcsConstants.STATUS.UCS_OK
                     }
             },
@@ -100,7 +100,7 @@ class UcxEventLoop(
 
                         logDev(s"ucxHandleConnectAck() id $remoteId address $address")
                         copiedAddress.put(address)
-                        channel.ucxHandleConnectAck(remoteId, copiedAddress)
+                        channel.ucxHandleConnectAck(ep, remoteId, copiedAddress)
                         UcsConstants.STATUS.UCS_OK
                     }
             },
@@ -353,7 +353,7 @@ class UcxEventLoop(
                 strategy match {
                     case SelectStrategy.CONTINUE => {}
 
-                    case SelectStrategy.BUSY_WAIT => while (ucpWorker.progress == 0) {}
+                    case SelectStrategy.BUSY_WAIT => epollBusyWait()
 
                     case SelectStrategy.SELECT => {
                         var skip = false
@@ -477,7 +477,7 @@ class UcxEventLoop(
         for (i <- 0 until ready) {
             val fd = events.fd(i)
             if (fd == eventFd) {
-                ucpWorker.progress()
+                while (ucpWorker.progress() != 0) {}
             } else if (fd == timerFd) {
                 timerFired = true
             }

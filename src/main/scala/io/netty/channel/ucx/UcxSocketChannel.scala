@@ -10,6 +10,7 @@ import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufUtil
 import io.netty.buffer.ByteBufAllocator
 import io.netty.buffer.Unpooled
+import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelFutureListener

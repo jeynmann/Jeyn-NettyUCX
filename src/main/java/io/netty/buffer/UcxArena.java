@@ -1,19 +1,11 @@
 
-package io.netty.channel.ucx;
+package io.netty.buffer;
 
 import io.netty.util.internal.PlatformDependent;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ConcurrentHashMap;
-
-import io.netty.buffer.*;
-import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
-import static java.lang.Math.max;
 
 import org.openucx.jucx.UcxUtils;
 import org.openucx.jucx.ucp.UcpContext;
@@ -29,7 +21,7 @@ public class UcxArena extends PoolArena<ByteBuffer> {
     }
 
     UcpContext ucpContext;
-    ConcurrentHashMap<long, UcpMemory> regChunks;
+    ConcurrentHashMap<Long, UcpMemory> regChunks;
     AtomicReference<PoolChunk<ByteBuffer>> unpooledCache;
 
     @Override
@@ -39,7 +31,7 @@ public class UcxArena extends PoolArena<ByteBuffer> {
 
     protected ByteBuffer toRigisteredBuffer(ByteBuffer buf) {
         regChunks.computeIfAbsent(UcxUtils.getAddress(buf),
-                                  (long address) -> ucpContext.registerMemory(buf));
+                                  (Long address) -> ucpContext.registerMemory(buf));
         return buf;
     }
 
@@ -81,7 +73,7 @@ public class UcxArena extends PoolArena<ByteBuffer> {
 
     @Override
     protected PoolChunk<ByteBuffer> newUnpooledChunk(int capacity) {
-        final ByteBuffer memoryCache = unpooledCache.get();
+        final PoolChunk<ByteBuffer> memoryCache = unpooledCache.get();
         if (memoryCache != null &&
             unpooledCache.compareAndSet(memoryCache, null)) {
             if (capacity <= memoryCache.chunkSize()) {
@@ -94,7 +86,6 @@ public class UcxArena extends PoolArena<ByteBuffer> {
         return newUnpooledChunkNoCache(capacity);
     }
 
-    @inline
     protected PoolChunk<ByteBuffer> newUnpooledChunkNoCache(int capacity) {
         if (directMemoryCacheAlignment == 0) {
             final ByteBuffer memory = allocateDirect(capacity);
@@ -119,7 +110,7 @@ public class UcxArena extends PoolArena<ByteBuffer> {
             return;
         }
 
-        final ByteBuffer memoryCache = unpooledCache.get();
+        final PoolChunk<ByteBuffer> memoryCache = unpooledCache.get();
         if (memoryCache.chunkSize() < chunk.chunkSize() &&
             unpooledCache.compareAndSet(memoryCache, chunk)) {
             destroyChunkNoCache(memoryCache);
@@ -129,7 +120,6 @@ public class UcxArena extends PoolArena<ByteBuffer> {
         destroyChunkNoCache(chunk);
     }
 
-    @inline
     protected void destroyChunkNoCache(PoolChunk<ByteBuffer> chunk) {
         if (PlatformDependent.useDirectBufferNoCleaner()) {
             PlatformDependent.freeDirectNoCleaner(

@@ -6,6 +6,7 @@ import io.netty.buffer.CompositeByteBuf
 import io.netty.buffer.ByteBufAllocator
 import io.netty.buffer.PooledByteBufAllocator
 import io.netty.buffer.ByteBufUtil
+import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.channel.RecvByteBufAllocator.DelegatingHandle
 import io.netty.channel.RecvByteBufAllocator.ExtendedHandle
 import io.netty.util.UncheckedBooleanSupplier

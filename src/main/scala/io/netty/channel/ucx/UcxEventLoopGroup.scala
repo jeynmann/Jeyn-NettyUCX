@@ -1,5 +1,6 @@
 package io.netty.channel.ucx
 
+import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.channel.DefaultSelectStrategyFactory
 import io.netty.channel.EventLoop
 import io.netty.channel.EventLoopGroup
@@ -26,13 +27,12 @@ class UcxEventLoopGroup(
     chooserFactory: EventExecutorChooserFactory = DefaultEventExecutorChooserFactory.INSTANCE,
     selectStrategyFactory: SelectStrategyFactory = DefaultSelectStrategyFactory.INSTANCE,
     rejectedExecutionHandler: RejectedExecutionHandler = RejectedExecutionHandlers.reject(),
-    queueFactory: EventLoopTaskQueueFactory = null)
+    queueFactory: EventLoopTaskQueueFactory = null,
+    val ucpContext: UcpContext = UcxPooledByteBufAllocator.UCP_CONTEXT)
     extends MultithreadEventLoopGroup(
         nThreads, executor, chooserFactory, 0.asInstanceOf[Object], selectStrategyFactory,
         rejectedExecutionHandler, queueFactory) with UcxLogging {
     logDev(s"UcxEventLoopGroup() nThreads $nThreads executor $executor chooserFactory $chooserFactory")
-
-    private[ucx] val ucpContext: UcpContext = UcxEventLoopGroup.ucpContext
 
     def this(nThreads: Int, executor: Executor,
              selectFactory: SelectStrategyFactory) = {
@@ -56,17 +56,4 @@ class UcxEventLoopGroup(
                 args(2).asInstanceOf[RejectedExecutionHandler],
                 args(3).asInstanceOf[EventLoopTaskQueueFactory])
     }
-}
-
-object UcxEventLoopGroup {
-    final val loadNative = {
-        NativeLibs.load()
-        true
-    }
-
-    final val ucpParams = new UcpParams().requestAmFeature().requestWakeupFeature()
-            .setMtWorkersShared(true).setConfig("USE_MT_MUTEX", "yes")
-            .setEstimatedNumEps(4000) // TODO: estimate eps
-
-    final val ucpContext = new UcpContext(UcxEventLoopGroup.ucpParams)
 }

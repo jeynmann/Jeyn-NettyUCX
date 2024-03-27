@@ -522,7 +522,6 @@ class UcxEventLoop(
 }
 
 object UcxEventLoop {
-    final val loadNative = UcxEventLoopGroup.loadNative
     final val localWorker = new ThreadLocal[UcxEventLoop]
 
     final val DEFAULT_MAX_PENDING_TASKS = SystemPropertyUtil.getInt(

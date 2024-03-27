@@ -26,12 +26,13 @@ class UcxEventLoopGroup(
     chooserFactory: EventExecutorChooserFactory = DefaultEventExecutorChooserFactory.INSTANCE,
     selectStrategyFactory: SelectStrategyFactory = DefaultSelectStrategyFactory.INSTANCE,
     rejectedExecutionHandler: RejectedExecutionHandler = RejectedExecutionHandlers.reject(),
-    queueFactory: EventLoopTaskQueueFactory = null,
-    private[ucx] val ucpContext: UcpContext = new UcpContext(UcxEventLoopGroup.ucpParams))
+    queueFactory: EventLoopTaskQueueFactory = null)
     extends MultithreadEventLoopGroup(
         nThreads, executor, chooserFactory, 0.asInstanceOf[Object], selectStrategyFactory,
         rejectedExecutionHandler, queueFactory) with UcxLogging {
     logDev(s"UcxEventLoopGroup() nThreads $nThreads executor $executor chooserFactory $chooserFactory")
+
+    private[ucx] val ucpContext: UcpContext = UcxEventLoopGroup.ucpContext
 
     def this(nThreads: Int, executor: Executor,
              selectFactory: SelectStrategyFactory) = {
@@ -66,4 +67,6 @@ object UcxEventLoopGroup {
     final val ucpParams = new UcpParams().requestAmFeature().requestWakeupFeature()
             .setMtWorkersShared(true).setConfig("USE_MT_MUTEX", "yes")
             .setEstimatedNumEps(4000) // TODO: estimate eps
+
+    final val ucpContext = new UcpContext(UcxEventLoopGroup.ucpParams)
 }

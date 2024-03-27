@@ -292,8 +292,8 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
         var directBuf: ByteBuf = null
         try {
-            directBuf = PreferredDirectByteBufAllocator.directBuffer0(
-                config().getAllocator(), readableBytes)
+            directBuf = UcxPooledByteBufAllocator.directBuffer(
+                config().getAllocator(), readableBytes, readableBytes)
 
             val readCb = new UcxCallback() {
                 override def onSuccess(r: UcpRequest): Unit = {
@@ -640,7 +640,7 @@ private[ucx] class UcxWritableByteChannel(
 
     protected var bOpen = true
     protected var directBuf: ByteBuf =
-        PreferredDirectByteBufAllocator.directBuffer0(alloc, size)
+        UcxPooledByteBufAllocator.directBuffer(alloc, size, size)
 
     def internalByteBuf(): ByteBuf = directBuf
 

@@ -80,8 +80,8 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     def newDirectBuffer(holder: Object, buf: ByteBuf): ByteBuf = {
         val readableBytes = buf.readableBytes()
         val allocator = config().getAllocator()
-        val directBuf = PreferredDirectByteBufAllocator.directBuffer0(
-            allocator, readableBytes)
+        val directBuf = UcxPooledByteBufAllocator.directBuffer(
+            allocator, readableBytes, readableBytes)
 
         directBuf.writeBytes(buf, buf.readerIndex(), readableBytes)
         ReferenceCountUtil.safeRelease(holder)

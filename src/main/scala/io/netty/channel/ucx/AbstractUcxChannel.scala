@@ -300,6 +300,10 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         def connectSuccess(): Unit = {
             throw new UnsupportedOperationException()
         }
+
+        def connectReset(status: Int, errorMsg: String): Unit = {
+            throw new UnsupportedOperationException()
+        }
     }
 
     override

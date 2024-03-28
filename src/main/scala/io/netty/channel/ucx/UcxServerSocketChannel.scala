@@ -96,8 +96,8 @@ class UcxServerSocketChannel(parent: Channel)
                 } else {
                     logWarning(s"$ep: $errorMsg")
                 }
-                Option(ucxEventLoop.delChannel(ep.getNativeId())).foreach(ch =>
-                    ch.ucxUnsafe.close(ch.ucxUnsafe.voidPromise()))
+                Option(ucxEventLoop.delChannel(ep.getNativeId())).foreach(
+                    _.ucxUnsafe.connectReset(status, errorMsg))
             }
         }
         val ucpEpParam = new UcpEndpointParams()

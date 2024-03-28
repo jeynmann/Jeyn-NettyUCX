@@ -30,34 +30,26 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.openucx.jucx.ucp.UcpContext;
 
 public class UcxPooledByteBufAllocator extends PooledByteBufAllocator {
-    public static UcxPooledByteBufAllocator DEFAULT = new UcxPooledByteBufAllocator();
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(
+        UcxPooledByteBufAllocator.class);
+    private static boolean loadFinshed = false;
+    private static Throwable loadError = null;
+    static {
+        loadNativeLibs();
+    }
     
     public static final int MIN_PAGE_SIZE = 4096;
     public static final int MAX_CHUNK_SIZE = (int) (((long) Integer.MAX_VALUE + 1) >> 1);
-    public static final int DEFAULT_DIRECT_MEMORY_CACHE_ALIGNMENT = MIN_PAGE_SIZE;
     public static final int DEFAULT_INITIAL_CAPACITY = 256;
     public static final int DEFAULT_MAX_CAPACITY = Integer.MAX_VALUE;
-    
-    private static final InternalLogger logger = InternalLoggerFactory.getInstance(
-        PooledByteBufAllocator.class);
-    private static boolean loadNative = false;
-    private static Throwable loadError = null;
-
-    static {
-        try {
-            NativeLibs.load();
-            loadNative = true;
-        } catch (Throwable e) {
-            logger.error("load NativeLibs:", e);
-            loadError = e;
-        }
-    }
+    public static final int DEFAULT_DIRECT_MEMORY_CACHE_ALIGNMENT = MIN_PAGE_SIZE;
 
     // TODO: estimate eps
-    public static final UcpParams UCP_PARAMS = new UcpParams()
+    public static UcpParams UCP_PARAMS = new UcpParams()
             .requestAmFeature().requestWakeupFeature().setMtWorkersShared(true)
             .setConfig("USE_MT_MUTEX", "yes").setEstimatedNumEps(4000);
-    public static final UcpContext UCP_CONTEXT = new UcpContext(UCP_PARAMS);
+    public static UcpContext UCP_CONTEXT = new UcpContext(UCP_PARAMS);
+    public static UcxPooledByteBufAllocator DEFAULT = new UcxPooledByteBufAllocator();    
 
     @SuppressWarnings("deprecation")
     public UcxPooledByteBufAllocator() {
@@ -209,10 +201,23 @@ public class UcxPooledByteBufAllocator extends PooledByteBufAllocator {
     }
 
     public static boolean isNativeLoad() {
-        return loadNative;
+        return loadFinshed;
     }
 
     public static Throwable getNativeError() {
         return loadError;
+    }
+
+    public static void loadNativeLibs() {
+        if (!loadFinshed) {
+            try {
+                NativeLibs.load();
+                loadFinshed = true;
+                logger.info("load NativeLibs: success");
+            } catch (Throwable e) {
+                logger.error("load NativeLibs:", e);
+                loadError = e;
+            }
+        }
     }
 }

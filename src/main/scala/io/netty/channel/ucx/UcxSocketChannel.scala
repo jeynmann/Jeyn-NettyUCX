@@ -299,7 +299,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             val readCb = new UcxCallback() {
                 override def onSuccess(r: UcpRequest): Unit = {
                     directBuf.writerIndex(readableBytes)
-                    pipe.fireChannelRead(directBuf)
+                    pipe.fireChannelRead(directBuf).fireChannelReadComplete()
                     logTrace(s"Read MESSAGE from $remote success: $directBuf")
                 }
                 override def onError(status: Int, errorMsg: String): Unit = {
@@ -632,6 +632,11 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
             logDebug(s"connected $local <-> $remote")
         }
+
+        override
+        def connectReset(status: Int, errorMsg: String): Unit = {
+            ucpErrHandler.onError(actionEp, status, errorMsg)
+        }
     }
 }
 
@@ -639,7 +644,7 @@ private[ucx] class UcxWritableByteChannel(
     alloc: ByteBufAllocator, size: Int)
     extends WritableByteChannel with UcxLogging {
 
-    protected var bOpen = true
+    protected var opened = true
     protected var directBuf: ByteBuf =
         UcxPooledByteBufAllocator.directBuffer(alloc, size, size)
 
@@ -662,11 +667,11 @@ private[ucx] class UcxWritableByteChannel(
     }
 
     def close(): Unit = {
-        if (bOpen) {
+        if (opened) {
             directBuf.release()
-            bOpen = false
+            opened = false
         }
     }
 
-    def isOpen() = bOpen
+    def isOpen() = opened
 }

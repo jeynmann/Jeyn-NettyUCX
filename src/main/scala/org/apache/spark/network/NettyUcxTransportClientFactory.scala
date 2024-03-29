@@ -34,6 +34,7 @@ import com.google.common.base.Throwables
 import com.google.common.collect.Lists
 import io.netty.bootstrap.Bootstrap
 import io.netty.buffer.PooledByteBufAllocator
+import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.channel.Channel
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelInitializer
@@ -79,7 +80,7 @@ class NettyUcxTransportClientFactory(
 
   private var socketChannelClass = classOf[UcxSocketChannel]
   private var workerGroup: EventLoopGroup = _
-  private var pooledAllocator: PooledByteBufAllocator = _
+  private var pooledAllocator: UcxPooledByteBufAllocator = _
   private var metrics: NettyMemoryMetrics = _
 
   def this(
@@ -95,9 +96,15 @@ class NettyUcxTransportClientFactory(
 
     val clientPoolPrefix = "UCX-shuffle-client"
     val clientThreadFactory = new DefaultThreadFactory(clientPoolPrefix, true)
-    workerGroup = new UcxEventLoopGroup(conf.clientThreads(), clientThreadFactory)
-    pooledAllocator = NettyUtils.createPooledByteBufAllocator(
-      conf.preferDirectBufs(), false /* allowCache */, conf.clientThreads())
+    val numCores = conf.clientThreads()
+    workerGroup = new UcxEventLoopGroup(numCores, clientThreadFactory)
+    pooledAllocator = new UcxPooledByteBufAllocator(
+      Math.min(PooledByteBufAllocator.defaultNumHeapArena(), numCores),
+      Math.min(PooledByteBufAllocator.defaultNumDirectArena(), numCores),
+      PooledByteBufAllocator.defaultPageSize(),
+      PooledByteBufAllocator.defaultMaxOrder(),
+      0, 0, 0, false
+    )
     metrics = new NettyMemoryMetrics(pooledAllocator, clientPoolPrefix, conf)
   }
 

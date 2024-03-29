@@ -49,7 +49,7 @@ public class UcxPooledByteBufAllocator extends PooledByteBufAllocator {
             .requestAmFeature().requestWakeupFeature().setMtWorkersShared(true)
             .setConfig("USE_MT_MUTEX", "yes").setEstimatedNumEps(4000);
     public static UcpContext UCP_CONTEXT = new UcpContext(UCP_PARAMS);
-    public static UcxPooledByteBufAllocator DEFAULT = new UcxPooledByteBufAllocator();    
+    public static UcxPooledByteBufAllocator DEFAULT = new UcxPooledByteBufAllocator();
 
     @SuppressWarnings("deprecation")
     public UcxPooledByteBufAllocator() {

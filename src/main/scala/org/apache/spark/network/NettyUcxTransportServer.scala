@@ -29,6 +29,7 @@ import com.google.common.base.Preconditions
 import com.google.common.collect.Lists
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.buffer.PooledByteBufAllocator
+import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelInitializer
 import io.netty.channel.ChannelOption
@@ -95,11 +96,20 @@ class NettyUcxTransportServer(
     val bossGroup = new UcxEventLoopGroup(1, bossThreadFactory)
 
     val workerPoolPrefix = "UCX-shuffle-server"
+    val numCores = conf.serverThreads()
     val workerThreadFactory = new DefaultThreadFactory(workerPoolPrefix, true).asInstanceOf[ThreadFactory]
-    val workerGroup = new UcxEventLoopGroup(conf.serverThreads(), workerThreadFactory)
+    val workerGroup = new UcxEventLoopGroup(numCores, workerThreadFactory)
 
-    val allocator = NettyUtils.createPooledByteBufAllocator(
-      conf.preferDirectBufs(), true /* allowCache */, conf.serverThreads())
+    val allocator = new UcxPooledByteBufAllocator(
+      Math.min(PooledByteBufAllocator.defaultNumHeapArena(), numCores),
+      Math.min(PooledByteBufAllocator.defaultNumDirectArena(), numCores),
+      PooledByteBufAllocator.defaultPageSize(),
+      PooledByteBufAllocator.defaultMaxOrder(),
+      PooledByteBufAllocator.defaultTinyCacheSize(),
+      PooledByteBufAllocator.defaultSmallCacheSize(),
+      PooledByteBufAllocator.defaultNormalCacheSize(),
+      PooledByteBufAllocator.defaultUseCacheForAllThreads()
+    )
 
     bootstrap = new ServerBootstrap()
       .group(bossGroup, workerGroup)

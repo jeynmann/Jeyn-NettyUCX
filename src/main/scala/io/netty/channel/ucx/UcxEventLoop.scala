@@ -1,20 +1,19 @@
 package io.netty.channel.ucx
 
-import org.openucx.jucx.{NativeLibs, UcxException}
-import org.openucx.jucx.ucp._
-import org.openucx.jucx.UcxCallback
-import org.openucx.jucx.ucs.UcsConstants
-import org.openucx.jucx.ucs.UcsConstants.MEMORY_TYPE
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.net.InetSocketAddress
+import java.util.Queue
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 
 import io.netty.channel.EventLoop
 import io.netty.channel.EventLoopGroup
 import io.netty.channel.EventLoopTaskQueueFactory
 import io.netty.channel.SelectStrategy
 import io.netty.channel.SingleThreadEventLoop
-// import io.netty.channel.unix.IovArray
 import io.netty.util.IntSupplier
-import io.netty.util.collection.IntObjectHashMap
-import io.netty.util.collection.IntObjectMap
 import io.netty.util.concurrent.RejectedExecutionHandler
 import io.netty.util.concurrent.AbstractScheduledEventExecutor
 import io.netty.util.internal.ObjectUtil
@@ -23,13 +22,8 @@ import io.netty.util.internal.logging.InternalLogger
 import io.netty.util.internal.logging.InternalLoggerFactory
 import io.netty.util.internal.SystemPropertyUtil
 
-import java.io.IOException
-import java.nio.ByteBuffer
-import java.net.InetSocketAddress
-import java.util.Queue
-import java.util.concurrent.Executor
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.ConcurrentHashMap
+import org.openucx.jucx.ucp._
+import org.openucx.jucx.ucs.UcsConstants
 
 object UcxAmId {
     final val CONNECT = 0
@@ -241,35 +235,12 @@ class UcxEventLoop(
         }
     }
 
-    // /**
-    //  * Return a cleared {@link IovArray} that can be used for writes in this {@link EventLoop}.
-    //  */
-    // def cleanIovArray(): IovArray = {
-    //     if (iovArray == null) {
-    //         iovArray = new IovArray()
-    //     } else {
-    //         iovArray.clear()
-    //     }
-    //     return iovArray
-    // }
-
-    // /**
-    //  * Return a cleared {@link NativeDatagramPacketArray} that can be used for writes in this {@link EventLoop}.
-    //  */
-    // def cleanDatagramPacketArray(): NativeDatagramPacketArray = {
-    //     if (datagramPacketArray == null) {
-    //         datagramPacketArray = new NativeDatagramPacketArray()
-    //     } else {
-    //         datagramPacketArray.clear()
-    //     }
-    //     return datagramPacketArray
-    // }
-
     override
     protected def wakeup(inEventLoop: Boolean): Unit = {
         if (!inEventLoop && nextWakeupNanos.getAndSet(AWAKE) != AWAKE) {
             // write to the evfd which will then wake-up epoll_wait(...)
             // NativeEpoll.eventFdWrite(eventFd, 1L)
+            pendingWakeup = false
             ucpWorker.signal()
         }
     }
@@ -323,7 +294,7 @@ class UcxEventLoop(
             return NativeEpoll.epollWait(epollFd, events, Int.MaxValue) // disarm timer
         }
         val totalDelay = AbstractScheduledEventExecutor.deadlineToDelayNanos(deadlineNanos)
-        val delayMillis = totalDelay / 1000
+        val delayMillis = totalDelay / 1000000
         return NativeEpoll.epollWait(epollFd, events, delayMillis.toInt)
     }
 

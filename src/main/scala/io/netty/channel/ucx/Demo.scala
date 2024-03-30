@@ -164,7 +164,14 @@ class Server(bindAddress: InetSocketAddress) extends Runnable {
                         channel.pipeline().addLast("echo", new Handler())
                     }
                 })
-
+        val eventLoop = acceptorGroup.next();
+        val task = new Runnable() { override def run() = { } }
+        val future = eventLoop.schedule(task, Long.MaxValue, java.util.concurrent.TimeUnit.MILLISECONDS);
+        println(future.awaitUninterruptibly(1000));
+        println(future.cancel(true));
+        println(System.currentTimeMillis())
+        val f2 = eventLoop.schedule(task, 1000, java.util.concurrent.TimeUnit.MILLISECONDS);
+        println(f2.get(), System.currentTimeMillis())
         try {
             val listener = newListener(_ => LOGGER.info("Server socket channel closed"))
             bootstrap.bind(bindAddress).addListener(new GenericFutureListener[ChannelFuture] {

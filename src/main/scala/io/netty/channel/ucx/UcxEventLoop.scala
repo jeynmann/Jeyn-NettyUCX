@@ -34,16 +34,15 @@ object UcxAmId {
 /**
  * {@link EventLoop} which uses epoll under the covers. Only works on Linux!
  */
-class UcxEventLoop(
-    parent: EventLoopGroup, executor: Executor, maxEvents: Int,
+class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     strategy: SelectStrategy, rejectedExecutionHandler: RejectedExecutionHandler,
-    queueFactory: EventLoopTaskQueueFactory)
+    queueFactory: EventLoopTaskQueueFactory, val ucpContext: UcpContext)
     extends SingleThreadEventLoop(
         parent, executor, false,
         UcxEventLoop.newTaskQueue(queueFactory),
         UcxEventLoop.newTaskQueue(queueFactory),
         rejectedExecutionHandler) with UcxLogging {
-    logDev(s"UcxEventLoop() parent $parent executor $executor maxEvents $maxEvents")
+    logDev(s"UcxEventLoop() parent $parent executor $executor ucpContext $ucpContext")
 
     private val ucxChannels = new ConcurrentHashMap[Long, AbstractUcxChannel]
 
@@ -56,7 +55,7 @@ class UcxEventLoop(
     def ucxEventLoopGroup = parent.asInstanceOf[UcxEventLoopGroup]
 
     private[ucx] def createUcpWorker(ucpWorkerParams: UcpWorkerParams): UcpWorker = {
-        val ucpWorker = ucxEventLoopGroup.ucpContext.newWorker(ucpWorkerParams)
+        val ucpWorker = ucpContext.newWorker(ucpWorkerParams)
 
         ucpWorker.setAmRecvHandler(
             UcxAmId.CONNECT,
@@ -152,7 +151,6 @@ class UcxEventLoop(
     private final var timerFd: Int = -1
     private final val channels = new scala.collection.concurrent.TrieMap[
         InetSocketAddress, AbstractUcxChannel]
-    private final var allowGrowing: Boolean = _
     private final var events: NativeEpollEventArray = _
 
     // // These are initialized on first use
@@ -181,13 +179,7 @@ class UcxEventLoop(
 
     {
         selectStrategy = ObjectUtil.checkNotNull(strategy, "strategy")
-        if (maxEvents == 0) {
-            allowGrowing = true
-            events = new NativeEpollEventArray(4)
-        } else {
-            allowGrowing = false
-            events = new NativeEpollEventArray(maxEvents)
-        }
+        events = new NativeEpollEventArray(4)
         var success = false
         try {
             ucpWorker = createUcpWorker(ucpWorkerParams)
@@ -399,11 +391,6 @@ class UcxEventLoop(
                     runAllTasks(0) // This will run the minimum number of tasks
                 }
 
-                if (allowGrowing && strategy == events.length()) {
-                    //increase the size of the array as we needed the whole space for the events
-                    events.increase()
-                }
-
                 if (isShuttingDown()) {
                     closeAll()
                     if (confirmShutdown()) {
@@ -450,6 +437,7 @@ class UcxEventLoop(
             if (fd == eventFd) {
                 while (ucpWorker.progress() != 0) {}
             } else if (fd == timerFd) {
+                logInfo("timeFd")
                 timerFired = true
             }
         }

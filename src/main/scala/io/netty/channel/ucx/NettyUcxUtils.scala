@@ -118,14 +118,14 @@ object MmapUtils extends UcxLogging {
 class UcxDebuger extends UcxLogging {
     private var id = 0
 
-    def debugInfo(cls: => Class[_] = this.getClass()) = {
+    def debugStage(cls: => Class[_] = this.getClass()) = {
         id += 1
-        logInfo(s"$cls stage $id")
+        logDev(s"$cls stage $id")
     }
 }
 
 object UcxDebuger{
     private val inst = new UcxDebuger
 
-    def debugInfo[T](t: T) = inst.debugInfo(t.getClass)
+    def debugStage[T](t: T) = inst.debugStage(t.getClass)
 }

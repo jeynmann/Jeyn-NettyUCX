@@ -16,7 +16,6 @@ import io.netty.util.concurrent.DefaultEventExecutorChooserFactory
 import java.util.concurrent.Executor
 import java.util.concurrent.ThreadFactory
 
-import org.openucx.jucx.{NativeLibs, UcxException}
 import org.openucx.jucx.ucp._
 /**
  * {@link EventLoopGroup} which uses epoll under the covers. Because of this

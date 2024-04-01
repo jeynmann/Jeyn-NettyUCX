@@ -22,6 +22,7 @@ import io.netty.util.internal.logging.InternalLogger
 import io.netty.util.internal.logging.InternalLoggerFactory
 import io.netty.util.internal.SystemPropertyUtil
 
+import org.openucx.jucx.UcxException
 import org.openucx.jucx.ucp._
 import org.openucx.jucx.ucs.UcsConstants
 
@@ -47,7 +48,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     private val ucxChannels = new ConcurrentHashMap[Long, AbstractUcxChannel]
 
     private val ucpWorkerParams = new UcpWorkerParams().requestThreadSafety()
-            .requestWakeupRX().requestWakeupTX().requestWakeupEdge()
 
     private[ucx] var ucpWorker: UcpWorker = _
     private[ucx] var ucpWorkerFd: Int = _
@@ -148,7 +148,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
 
     private final var eventFd: Int = -1
     private final var epollFd: Int = -1
-    private final var timerFd: Int = -1
     private final val channels = new scala.collection.concurrent.TrieMap[
         InetSocketAddress, AbstractUcxChannel]
     private final var events: NativeEpollEventArray = _
@@ -169,7 +168,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     //    NONE             when EL is waiting with no wakeup scheduled
     //    other value T    when EL is waiting with wakeup scheduled at time T
     private final val nextWakeupNanos = new AtomicLong(AWAKE)
-    private var pendingWakeup: Boolean = _
+    private var pendingWakeup: Boolean = true
     @volatile private var ioRatio = 50
 
     private final val AWAKE = -1L
@@ -186,7 +185,25 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
             ucpWorkerFd = ucpWorker.getEventFD()
 
             epollFd = NativeEpoll.newEpoll()
-            eventFd = ucpWorkerFd
+            try {
+                ucpWorker.arm()
+            } catch  {
+                case e: UcxException => {
+                    logDebug("worker arm:", e)
+                    pendingWakeup = false
+                }
+                case e: Throwable =>
+                throw new IllegalStateException("worker arm:", e)
+            }
+            try {
+                // It is important to use EPOLLET here as we only want to get the notification once per
+                // wakeup and don't call read(...).
+                NativeEpoll.epollCtlAdd(epollFd, ucpWorkerFd, NativeEpoll.EPOLLIN)
+            } catch  {
+                case e: IOException =>
+                throw new IllegalStateException("Unable to add workerFd filedescriptor to epoll", e)
+            }
+            eventFd = NativeEpoll.newEventFd()
             try {
                 // It is important to use EPOLLET here as we only want to get the notification once per
                 // wakeup and don't call eventfd_read(...).
@@ -194,15 +211,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
             } catch {
                 case e: IOException =>
                 throw new IllegalStateException("Unable to add eventFd filedescriptor to epoll", e)
-            }
-            timerFd = NativeEpoll.newTimerFd()
-            try {
-                // It is important to use EPOLLET here as we only want to get the notification once per
-                // wakeup and don't call read(...).
-                NativeEpoll.epollCtlAdd(epollFd, timerFd, NativeEpoll.EPOLLIN | NativeEpoll.EPOLLET)
-            } catch  {
-                case e: IOException =>
-                throw new IllegalStateException("Unable to add timerFd filedescriptor to epoll", e)
             }
             success = true
         } finally {
@@ -215,9 +223,9 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         case _: Exception => {}
                     }
                 }
-                if (timerFd > 0) {
+                if (eventFd > 0) {
                     try {
-                        NativeEpoll.close(timerFd)
+                        NativeEpoll.close(eventFd)
                     } catch {
                         // ignore
                         case _: Exception => {}
@@ -231,9 +239,8 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     protected def wakeup(inEventLoop: Boolean): Unit = {
         if (!inEventLoop && nextWakeupNanos.getAndSet(AWAKE) != AWAKE) {
             // write to the evfd which will then wake-up epoll_wait(...)
-            // NativeEpoll.eventFdWrite(eventFd, 1L)
             pendingWakeup = false
-            ucpWorker.signal()
+            NativeEpoll.eventFdWrite(eventFd, 1L)
         }
     }
 
@@ -308,7 +315,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
 
     override
     protected def run(): Unit = {
-        var prevDeadlineNanos = NONE
         UcxEventLoop.localWorker.set(this)
         while (true) {
             try {
@@ -316,79 +322,53 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                 strategy match {
                     case SelectStrategy.CONTINUE => {}
 
-                    case SelectStrategy.BUSY_WAIT => epollBusyWait()
+                    case SelectStrategy.BUSY_WAIT => {
+                        strategy = epollBusyWait()
+                    }
 
                     case SelectStrategy.SELECT => {
-                        var skip = false
-                        if (pendingWakeup) {
-                            // We are going to be immediately woken so no need to reset wakenUp
-                            // or check for timerfd adjustment.
-                            strategy = epollWaitTimeboxed()
-                            if (strategy != 0) {
-                                skip = true
-                            } else {
-                                // We timed out so assume that we missed the write event due to an
-                                // abnormally failed syscall (the write itself or a prior epoll_wait)
-                                logWarning("Missed eventfd write (not seen after > 1 second)")
-                                pendingWakeup = false
-                                if (hasTasks()) {
-                                    skip = true
+                        try {
+                            if (pendingWakeup) {
+                                var curDeadlineNanos = nextScheduledTaskDeadlineNanos()
+                                if (curDeadlineNanos == -1L) {
+                                    curDeadlineNanos = NONE // nothing on the calendar
                                 }
+                                nextWakeupNanos.set(curDeadlineNanos)
+                                strategy = epollWait(curDeadlineNanos)
                             }
-                        }
-
-                        if (!skip) {
-                            var curDeadlineNanos = nextScheduledTaskDeadlineNanos()
-                            if (curDeadlineNanos == -1L) {
-                                curDeadlineNanos = NONE // nothing on the calendar
-                            }
-                            nextWakeupNanos.set(curDeadlineNanos)
-                            try {
-                                if (!hasTasks()) {
-                                    if (curDeadlineNanos == prevDeadlineNanos) {
-                                        // No timer activity needed
-                                        strategy = epollWaitNoTimerChange()
-                                    } else {
-                                        // Timerfd needs to be re-armed or disarmed
-                                        prevDeadlineNanos = curDeadlineNanos
-                                        strategy = epollWait(curDeadlineNanos)
-                                    }
-                                }
-                            } finally {
-                                // Try get() first to avoid much more expensive CAS in the case we
-                                // were woken via the wakeup() method (submitted task)
-                                if (nextWakeupNanos.get() == AWAKE || nextWakeupNanos.getAndSet(AWAKE) == AWAKE) {
-                                    pendingWakeup = true
-                                }
+                        } finally {
+                            // Try get() first to avoid much more expensive CAS in the case we
+                            // were woken via the wakeup() method (submitted task)
+                            if (nextWakeupNanos.get() != AWAKE) {
+                                nextWakeupNanos.set(AWAKE)
                             }
                         }
                     }
                     case _ => {}
                 }
-
+                // we have only 2 fds: event fd and worker fd.
+                val hasIOReady = (!pendingWakeup) || (strategy > 1) ||
+                                 ((strategy == 1) && (events.fd(0) == ucpWorkerFd))
                 val ioRatio = this.ioRatio
                 if (ioRatio == 100) {
                     try {
-                        if (strategy > 0 && processReady(strategy)) {
-                            prevDeadlineNanos = NONE
-                        }
+                        processReady()
                     } finally {
                         // Ensure we always run tasks.
                         runAllTasks()
                     }
-                } else if (strategy > 0) {
+                } else if (hasIOReady) {
                     val ioStartTime = System.nanoTime()
                     try {
-                        if (processReady(strategy)) {
-                            prevDeadlineNanos = NONE
-                        }
+                        processReady()
                     } finally {
                         // Ensure we always run tasks.
                         val ioTime = System.nanoTime() - ioStartTime
                         runAllTasks(ioTime * (100 - ioRatio) / ioRatio)
                     }
                 } else {
-                    runAllTasks(0) // This will run the minimum number of tasks
+                    // run least task
+                    runAllTasks(0)
                 }
 
                 if (isShuttingDown()) {
@@ -430,31 +410,26 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     }
 
     // Returns true if a timerFd event was encountered
-    private def processReady(ready: Int): Boolean = {
-        var timerFired = false
-        for (i <- 0 until ready) {
-            val fd = events.fd(i)
-            if (fd == eventFd) {
-                while (ucpWorker.progress() != 0) {}
-            } else if (fd == timerFd) {
-                logInfo("timeFd")
-                timerFired = true
-            }
+    private def processReady(): Unit = {
+        while (ucpWorker.progress() != 0) {}
+        try {
+            ucpWorker.arm()
+            pendingWakeup = true
+        } catch {
+            // if device is busy, we need to progress again
+            case e: UcxException => pendingWakeup = false
         }
-        return timerFired
     }
 
     override
     protected def cleanup() = {
         try {
             // Ensure any in-flight wakeup writes have been performed prior to closing eventFd.
-            while (pendingWakeup) {
+            var hasInFlight = (!pendingWakeup) || (epollWaitNow() > 0)
+            while (hasInFlight) {
                 try {
-                    while (ucpWorker.progress() != 0) {}
-                    val count = epollWaitTimeboxed()
-                    if (count == 0) {
-                        pendingWakeup = false
-                    }
+                    processReady()
+                    hasInFlight = (!pendingWakeup) || (epollWaitNow() > 0)
                 } catch {
                     // ignore
                     case _: IOException => {}
@@ -462,7 +437,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
             }
 
             try {
-                NativeEpoll.close(timerFd)
+                NativeEpoll.close(eventFd)
             } catch {
                 case e: Exception =>
                     logWarning("Failed to close the timer fd.", e)

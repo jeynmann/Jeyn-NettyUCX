@@ -11,6 +11,7 @@ import io.netty.bootstrap.Bootstrap
 import io.netty.bootstrap.ServerBootstrap
 
 import io.netty.channel.Channel
+import io.netty.channel.ChannelOption
 import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelInitializer
 import io.netty.channel.ChannelHandlerContext
@@ -108,6 +109,7 @@ class Client(
                     channel.pipeline().addLast("echo", new Handler())
                 }
             })
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS.asInstanceOf[ChannelOption[Any]], 5000)
 
         try {
             val channel = bootstrap.connect(remoteAddress, bindAddress).sync().channel()
@@ -165,13 +167,17 @@ class Server(bindAddress: InetSocketAddress) extends Runnable {
                     }
                 })
         val eventLoop = acceptorGroup.next();
+
         val task = new Runnable() { override def run() = { } }
-        val future = eventLoop.schedule(task, Long.MaxValue, java.util.concurrent.TimeUnit.MILLISECONDS);
-        println(future.awaitUninterruptibly(1000));
-        println(future.cancel(true));
-        println(System.currentTimeMillis())
-        val f2 = eventLoop.schedule(task, 1000, java.util.concurrent.TimeUnit.MILLISECONDS);
-        println(f2.get(), System.currentTimeMillis())
+        val f1 = eventLoop.schedule(task, Long.MaxValue, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assert(f1.awaitUninterruptibly(1000) == false);
+        assert(f1.cancel(true));
+
+        val f2Start = System.currentTimeMillis()
+        eventLoop.schedule(task, 1000, java.util.concurrent.TimeUnit.MILLISECONDS).get()
+        assert(System.currentTimeMillis() - f2Start >= 1000)
+        LOGGER.info("schedule success")
+
         try {
             val listener = newListener(_ => LOGGER.info("Server socket channel closed"))
             bootstrap.bind(bindAddress).addListener(new GenericFutureListener[ChannelFuture] {

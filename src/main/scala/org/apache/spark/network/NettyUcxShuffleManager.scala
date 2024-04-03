@@ -57,6 +57,7 @@ class NettyUcxShuffleManager(val conf: SparkConf, isDriver: Boolean)
 
       shuffleService.init(env.blockManager)
       blockTransferService.set(shuffleService)
+      logInfo(s"start shuffle service: success.")
       shuffleService
     }
   })

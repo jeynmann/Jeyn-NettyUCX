@@ -14,6 +14,7 @@ import io.netty.channel.ChannelFutureListener
 import io.netty.channel.ChannelPromise
 import io.netty.channel.ChannelOutboundBuffer
 import io.netty.channel.FileRegion
+import io.netty.channel.DefaultFileRegion
 import io.netty.channel.socket.SocketChannel
 import io.netty.util.AbstractReferenceCounted
 
@@ -82,7 +83,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             msg match {
             case buf: ByteBuf =>
                 writeByteBuf(buf)
-            case fm: UcxFileMessage =>
+            case fm: UcxFileRegionMsg =>
                 writeFileMessage(fm)
             case _ =>
                 // Should never reach here.
@@ -97,45 +98,15 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
     }
 
-    class WriteUcxCallback(buf: ByteBuf, private var refCounts: Int)
-        extends UcxCallback with UcxLogging {
-        override def onSuccess(request: UcpRequest): Unit = {
-            release()
-            logTrace(s"$local MESSAGE $remote: success")
-        }
-
-        override def onError(status: Int, errorMsg: String): Unit = {
-            release()
-            throw new UcxException(s"$local MESSAGE $remote: $errorMsg", status)
-        }
-
-        @inline
-        protected def release(): Unit = {
-            refCounts -= 1
-            if (refCounts == 0) {
-                buf.release()
-            }
-        }
-    }
-
-    private def writeFileMessage(fm: UcxFileMessage): Int = {
+    protected def writeFileMessage(fm: UcxFileRegionMsg): Int = {
         var buf: ByteBuf = null
         try {
             buf = fm.newNioBuffer()
-            if (buf.readableBytes() == 0) {
-                buf.release()
+            if (buf == null) {
                 return 0
             }
 
-            val nioBufferCount = buf.nioBufferCount()
-            val writeCb = new WriteUcxCallback(buf, nioBufferCount)
-
-            if (buf.hasMemoryAddress() || buf.nioBufferCount() == 1) {
-                doWriteBytes(buf, writeCb)
-            } else {
-                doWriteBytesMultiple(buf, writeCb)
-            }
-
+            doWriteByteBuf(buf)
             return 1
         } catch {
             case t: Throwable => {
@@ -147,50 +118,39 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
     }
 
-    private def writeByteBuf(buf: ByteBuf): Int = {
+    protected def writeByteBuf(buf: ByteBuf): Int = {
         if (buf.readableBytes() == 0) {
             return 0
         }
         // Increment refCounts here to let UcxCallback release
         buf.retain()
 
+        doWriteByteBuf(buf)
+        return 1
+    }
+
+    protected def doWriteByteBuf(buf: ByteBuf): Int = {
         val nioBufferCount = buf.nioBufferCount()
-        val writeCb = new WriteUcxCallback(buf, nioBufferCount)
+        val writeCb = newWriteUcxCallback(buf, nioBufferCount)
 
-        if (buf.hasMemoryAddress() || nioBufferCount == 1) {
-            doWriteBytes(buf, writeCb)
+        val hasAddress = buf.hasMemoryAddress()
+        val writeOnce = hasAddress || (nioBufferCount == 1)
+        if (writeOnce) {
+            if (hasAddress) {
+                underlyingUnsafe.doWrite0(buf.memoryAddress(), buf.readerIndex(),
+                                          buf.writerIndex(), writeCb)
+            } else {
+                val nioBuf = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
+                underlyingUnsafe.doWrite0(nioBuf, writeCb)
+            }
         } else {
-            doWriteBytesMultiple(buf, writeCb)
+            buf.nioBuffers().foreach(underlyingUnsafe.doWrite0(_, writeCb))
         }
 
         return 1
     }
 
-    private def doWriteBytesMultiple(buf: ByteBuf, writeCb: UcxCallback): Int = {
-        // TODO: support iov
-        val nioBuffers = buf.nioBuffers()
-
-        for (nioBuf <- nioBuffers) {
-            underlyingUnsafe.doWrite0(nioBuf, writeCb)
-        }
-
-        return 1
-    }
-
-    private def doWriteBytes(buf: ByteBuf, writeCb: UcxCallback): Int = {
-        if (buf.hasMemoryAddress()) {
-            underlyingUnsafe.doWrite0(buf.memoryAddress(), buf.readerIndex(),
-                                      buf.writerIndex(), writeCb)
-        } else { // buf.nioBufferCount() == 1
-            val nioBuf = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
-
-            underlyingUnsafe.doWrite0(nioBuf, writeCb)
-        }
-
-        return 1
-    }
-
-    protected[ucx] def isBufferCopyNeededForWrite(byteBuf: ByteBuf): Boolean = {
+    protected def isBufferCopyNeededForWrite(byteBuf: ByteBuf): Boolean = {
         return !byteBuf.hasMemoryAddress() && !byteBuf.isDirect();
     }
 
@@ -205,15 +165,20 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                     buf
                 }
             }
+            case fr: DefaultFileRegion => {
+                new UcxDefaultFileRegionMsg(fr, config().getAllocator())
+            }
             case fr: FileRegion => {
-                val fm = new UcxFileMessage(fr, config().getAllocator())
-                fr.release()
-                fm
+                new UcxFileRegionMsg(fr, config().getAllocator())
             }
             case _ => 
                 throw new UnsupportedOperationException(
                     s"unsupported message type: ${msg.getClass}")
         }
+    }
+
+    protected def newWriteUcxCallback(buf: ByteBuf, refCounts: Int): UcxCallback = {
+        new UcxSharedCallback(buf, refCounts, local, remote)
     }
 
     override
@@ -570,14 +535,38 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     }
 }
 
-private[ucx] class UcxFileMessage(fr: FileRegion, allocator: ByteBufAllocator)
-    extends AbstractReferenceCounted {
-    fr.retain()
+class UcxSharedCallback(buf: ByteBuf, private var refCounts: Int,
+                        local: SocketAddress, remote: SocketAddress)
+    extends UcxCallback with UcxLogging {
+    override def onSuccess(request: UcpRequest): Unit = {
+        release()
+        logTrace(s"$local MESSAGE $remote: success")
+    }
 
+    override def onError(status: Int, errorMsg: String): Unit = {
+        release()
+        throw new UcxException(s"$local MESSAGE $remote: $errorMsg", status)
+    }
+
+    @inline
+    protected def release(): Unit = {
+        refCounts -= 1
+        if (refCounts == 0) {
+            buf.release()
+        }
+    }
+}
+
+private[ucx] class UcxFileRegionMsg(fr: FileRegion, allocator: ByteBufAllocator)
+    extends AbstractReferenceCounted {
     def newNioBuffer(): ByteBuf = {
         // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
         val offset = fr.transferred()
         val readableBytes = (fr.count() - offset).toInt
+        if (readableBytes <= 0) {
+            return null
+        }
+
         val byteChannel = new UcxWritableByteChannel(allocator, readableBytes)
 
         fr.transferTo(byteChannel, offset)
@@ -600,6 +589,40 @@ private[ucx] class UcxFileMessage(fr: FileRegion, allocator: ByteBufAllocator)
         fr.release()
     }
 }
+private[ucx] class UcxDefaultFileRegionMsg(fr: DefaultFileRegion,
+                                           allocator: ByteBufAllocator)
+    extends UcxFileRegionMsg(fr, allocator) {
+    override
+    def newNioBuffer(): ByteBuf = {
+        // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
+        val ch = UcxDefaultFileRegionMsg.getChannel(fr)
+        val offset = fr.transferred()
+        val readableBytes = (fr.count() - offset).toInt
+        val directBuf = UcxPooledByteBufAllocator.directBuffer(
+            allocator, readableBytes, readableBytes)
+
+        if (directBuf.nioBufferCount() == 1) {
+            val nioBuf = directBuf.internalNioBuffer(directBuf.readerIndex(),
+                                                     readableBytes)
+            ch.read(nioBuf, fr.position() + offset)
+        } else {
+            directBuf.nioBuffers().foreach(
+                ch.read(_, fr.position() + fr.transferred()))
+        }
+
+        return directBuf
+    }
+}
+
+object UcxDefaultFileRegionMsg {
+    private val clazz = classOf[DefaultFileRegion]
+    private val fileField = clazz.getDeclaredField("file")
+
+    def getChannel(fr: DefaultFileRegion): java.nio.channels.FileChannel = {
+        fr.open()
+        return fileField.get(fr).asInstanceOf[java.nio.channels.FileChannel]
+    }
+}
 
 private[ucx] class UcxWritableByteChannel(
     alloc: ByteBufAllocator, size: Int)
@@ -611,7 +634,7 @@ private[ucx] class UcxWritableByteChannel(
 
     def internalByteBuf(): ByteBuf = directBuf
 
-    def write(src: ByteBuffer): Int = {
+    override def write(src: ByteBuffer): Int = {
         val dup = src.duplicate()
         val readableBytes = dup.remaining()
         if (readableBytes > size) {
@@ -627,12 +650,12 @@ private[ucx] class UcxWritableByteChannel(
         return written
     }
 
-    def close(): Unit = {
+    override def close(): Unit = {
         if (opened) {
             directBuf.release()
             opened = false
         }
     }
 
-    def isOpen() = opened
+    override def isOpen() = opened
 }

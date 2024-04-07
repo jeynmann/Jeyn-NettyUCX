@@ -19,6 +19,7 @@ import io.netty.channel.socket.SocketChannel
 import io.netty.util.AbstractReferenceCounted
 
 import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.channels.WritableByteChannel
 import java.net.SocketAddress
 import java.net.InetSocketAddress
@@ -101,7 +102,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     protected def writeFileMessage(fm: UcxFileRegionMsg): Int = {
         var buf: ByteBuf = null
         try {
-            buf = fm.newNioBuffer()
+            buf = fm.newByteBuf()
             if (buf == null) {
                 return 0
             }
@@ -135,16 +136,19 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
         val hasAddress = buf.hasMemoryAddress()
         val writeOnce = hasAddress || (nioBufferCount == 1)
+        val readerIndex = buf.readerIndex()
+        val readableBytes = buf.readableBytes()
         if (writeOnce) {
             if (hasAddress) {
-                underlyingUnsafe.doWrite0(buf.memoryAddress(), buf.readerIndex(),
+                underlyingUnsafe.doWrite0(buf.memoryAddress(), readerIndex,
                                           buf.writerIndex(), writeCb)
             } else {
-                val nioBuf = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
+                val nioBuf = buf.internalNioBuffer(readerIndex, readableBytes)
                 underlyingUnsafe.doWrite0(nioBuf, writeCb)
             }
         } else {
-            buf.nioBuffers().foreach(underlyingUnsafe.doWrite0(_, writeCb))
+            buf.nioBuffers(readerIndex, readableBytes).foreach(
+                underlyingUnsafe.doWrite0(_, writeCb))
         }
 
         return 1
@@ -557,9 +561,9 @@ class UcxSharedCallback(buf: ByteBuf, private var refCounts: Int,
     }
 }
 
-private[ucx] class UcxFileRegionMsg(fr: FileRegion, allocator: ByteBufAllocator)
+class UcxFileRegionMsg(fr: FileRegion, allocator: ByteBufAllocator)
     extends AbstractReferenceCounted {
-    def newNioBuffer(): ByteBuf = {
+    def newByteBuf(): ByteBuf = {
         // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
         val offset = fr.transferred()
         val readableBytes = (fr.count() - offset).toInt
@@ -589,27 +593,25 @@ private[ucx] class UcxFileRegionMsg(fr: FileRegion, allocator: ByteBufAllocator)
         fr.release()
     }
 }
-private[ucx] class UcxDefaultFileRegionMsg(fr: DefaultFileRegion,
-                                           allocator: ByteBufAllocator)
+
+class UcxDefaultFileRegionMsg(fr: DefaultFileRegion, allocator: ByteBufAllocator,
+                              offset: Long, length: Long)
     extends UcxFileRegionMsg(fr, allocator) {
-    override
-    def newNioBuffer(): ByteBuf = {
-        // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
-        val ch = UcxDefaultFileRegionMsg.getChannel(fr)
-        val offset = fr.transferred()
-        val readableBytes = (fr.count() - offset).toInt
+
+    def this(fr: DefaultFileRegion, allocator: ByteBufAllocator) = {
+        this(fr, allocator, fr.position() + fr.transferred(),
+             fr.count() - fr.transferred())
+    }
+
+    protected val fileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
+
+    override def newByteBuf(): ByteBuf = {
+        val readableBytes = length.toInt
         val directBuf = UcxPooledByteBufAllocator.directBuffer(
             allocator, readableBytes, readableBytes)
 
-        if (directBuf.nioBufferCount() == 1) {
-            val nioBuf = directBuf.internalNioBuffer(directBuf.readerIndex(),
-                                                     readableBytes)
-            ch.read(nioBuf, fr.position() + offset)
-        } else {
-            directBuf.nioBuffers().foreach(
-                ch.read(_, fr.position() + fr.transferred()))
-        }
-
+        UcxDefaultFileRegionMsg.copyDefaultFileRegion(fileChannel, offset, length,
+                                                      directBuf)
         return directBuf
     }
 }
@@ -618,14 +620,32 @@ object UcxDefaultFileRegionMsg {
     private val clazz = classOf[DefaultFileRegion]
     private val fileField = clazz.getDeclaredField("file")
 
-    def getChannel(fr: DefaultFileRegion): java.nio.channels.FileChannel = {
+    fileField.setAccessible(true)
+
+    def getChannel(fr: DefaultFileRegion): FileChannel = {
         fr.open()
-        return fileField.get(fr).asInstanceOf[java.nio.channels.FileChannel]
+        return fileField.get(fr).asInstanceOf[FileChannel]
+    }
+
+    def copyDefaultFileRegion(fileChannel: FileChannel, offset: Long,
+                              length: Long, directBuf: ByteBuf): Unit = {
+        // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
+
+        fileChannel.position(offset)
+
+        val writerIndex = directBuf.writerIndex()
+        if (directBuf.nioBufferCount() == 1) {
+            val nioBuf = directBuf.internalNioBuffer(writerIndex, length.toInt)
+            fileChannel.read(nioBuf)
+        } else {
+            fileChannel.read(directBuf.nioBuffers(writerIndex, length.toInt))
+        }
+
+        directBuf.writerIndex(writerIndex + length.toInt)
     }
 }
 
-private[ucx] class UcxWritableByteChannel(
-    alloc: ByteBufAllocator, size: Int)
+class UcxWritableByteChannel(val alloc: ByteBufAllocator, val size: Int)
     extends WritableByteChannel with UcxLogging {
 
     protected var opened = true
@@ -658,4 +678,31 @@ private[ucx] class UcxWritableByteChannel(
     }
 
     override def isOpen() = opened
+}
+
+class UcxDummyWritableByteChannel(val size: Int)
+    extends WritableByteChannel with UcxLogging {
+
+    protected var opened = true
+
+    override def write(src: ByteBuffer): Int = {
+        val readableBytes = src.remaining().min(size)
+        val position = src.position()
+        src.position(position + readableBytes)
+        return readableBytes
+    }
+
+    override def close(): Unit = {
+        if (opened) {
+            opened = false
+        }
+    }
+
+    override def isOpen() = opened
+}
+
+object UcxDummyWritableByteChannel {
+    def apply(ucxWritableCh: UcxWritableByteChannel): UcxDummyWritableByteChannel = {
+        new UcxDummyWritableByteChannel(ucxWritableCh.size)
+    }
 }

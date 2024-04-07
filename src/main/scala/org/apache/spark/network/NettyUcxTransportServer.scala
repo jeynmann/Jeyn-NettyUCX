@@ -42,6 +42,7 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import org.apache.spark.network.TransportContext
+import org.apache.spark.network.protocol.NettyUcxMessageEncoder
 import org.apache.spark.network.util._
 import java.util.concurrent.ThreadFactory
 
@@ -140,6 +141,8 @@ class NettyUcxTransportServer(
           rpcHandler = bootstrap.doBootstrap(ch, rpcHandler)
         }
         context.initializePipeline(ch, rpcHandler)
+        ch.pipeline().addAfter("encoder", "ucx_encoder", NettyUcxMessageEncoder.INSTANCE)
+          .remove("encoder")
       }
     })
 

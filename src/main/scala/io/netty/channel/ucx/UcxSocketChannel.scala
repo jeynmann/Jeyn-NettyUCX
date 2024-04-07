@@ -643,9 +643,9 @@ private[ucx] class UcxWritableByteChannel(
 
         directBuf.writeBytes(dup)
 
-        val written = readableBytes - dup.remaining()
         src.position(dup.position())
 
+        val written = readableBytes - src.remaining()
         logDev(s"write() $dup $src $written")
         return written
     }

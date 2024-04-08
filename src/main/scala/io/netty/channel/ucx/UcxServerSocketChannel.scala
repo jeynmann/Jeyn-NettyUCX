@@ -66,7 +66,6 @@ class UcxServerSocketChannel(parent: Channel)
     }
 
     protected def newChildChannel(): UcxSocketChannel = {
-        logDev(s"newChildChannel()")
         new UcxSocketChannel(this)
     }
 
@@ -78,7 +77,6 @@ class UcxServerSocketChannel(parent: Channel)
     }
 
     class UcxServerUnsafe extends AbstractUcxUnsafe {
-        logDev(s"UcxServerUnsafe()")
         val ucpConnectHandler = new UcpListenerConnectionHandler {
             override def onConnectionRequest(request: UcpConnectionRequest) = {
                 setConnectionRequest(request)
@@ -106,7 +104,6 @@ class UcxServerSocketChannel(parent: Channel)
         def connect(
             remoteAddress: SocketAddress, localAddress: SocketAddress,
             promise: ChannelPromise): Unit = {
-            logDev(s"connect() $remoteAddress $localAddress")
             // Connect not supported by ServerChannel implementations
             promise.setFailure(new UnsupportedOperationException())
         }
@@ -122,14 +119,12 @@ class UcxServerSocketChannel(parent: Channel)
 
         override
         def setSocketAddress(address: InetSocketAddress): Unit = {
-            logDev(s"setSocketAddress() $address")
             ucpListenerParam.setSockAddr(address)
             local = address
         }
 
         override
         def dolisten0():Unit = {
-            logDev(s"dolisten0()")
             ucpListener = ucpWorker.newListener(ucpListenerParam)
             active = true
         }
@@ -153,8 +148,8 @@ class UcxServerSocketChannel(parent: Channel)
 
         override
         def doClose0():Unit = {
-            logDev(s"doClose0()")
             if (ucpListener != null) {
+                logDev(s"doClose0()")
                 ucpListener.close()
                 ucpListener = null
             }

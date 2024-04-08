@@ -148,7 +148,6 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                 return
             }
 
-            logDev(s"connect() $localAddress->$remoteAddress promise=$promise")
             try {
                 if (connectPromise != null) {
                     throw new ConnectionPendingException()
@@ -164,7 +163,6 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                     connectTimeoutFuture = eventLoop().schedule(() => {
                         val cause = new ConnectTimeoutException("connection timed out: " + remoteAddress)
                         if (connectPromise != null && connectPromise.tryFailure(cause)) {
-                            logDev(s"connect() $localAddress->$remoteAddress timeout $connectTimeoutMillis ms")
                             close(voidPromise())
                         }
                     }
@@ -174,7 +172,6 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                 promise.addListener(new ChannelFutureListener() {
                     override
                     def operationComplete(future: ChannelFuture) = {
-                        logDev(s"connect() $localAddress->$remoteAddress complete $future")
                         if (future.isCancelled()) {
                             if (connectTimeoutFuture != null) {
                                 connectTimeoutFuture.cancel(false)
@@ -186,7 +183,6 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                 })
             } catch {
                 case t: Throwable => {
-                    logDev(s"connect() $localAddress->$remoteAddress error $t")
                     closeIfClosed()
                     promise.tryFailure(annotateConnectException(t, remoteAddress))
                 }
@@ -200,22 +196,18 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
             try {
                 val wasActive = isActive()
-                logDev(s"finishConnect() $remoteAddress wasActive=$wasActive")
                 fulfillConnectPromise(connectPromise, wasActive)
                 if (connectTimeoutFuture != null) {
-                    logDev(s"finishConnect() $remoteAddress connectTimeoutFuture=$connectTimeoutFuture")
                     connectTimeoutFuture.cancel(false)
                 }
                 connectPromise = null
             } catch {
                 case t: Throwable =>
-                    logDev(s"finishConnect() $remoteAddress t=$t")
                     fulfillConnectPromise(connectPromise, annotateConnectException(t, remoteAddress))
             }
         }
 
         private def fulfillConnectPromise(promise: ChannelPromise, wasActive: Boolean): Unit = {
-            logDev(s"fulfillConnectPromise() promise=$promise wasActive=$wasActive")
             if (promise == null) {
                 // Closed via cancellation and the promise has been notified already.
                 return
@@ -232,7 +224,6 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             // Regardless if the connection attempt was cancelled, channelActive() event should be triggered,
             // because what happened is what happened.
             if (!wasActive && nowActive) {
-                logDev(s"fulfillConnectPromise() fireChannelActive()")
                 pipeline().fireChannelActive()
             }
         
@@ -350,13 +341,11 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     override
     protected def doRegister(): Unit = {
-        logDev(s"doRegister() $this to $ucxEventLoop($ucxEventLoop.ucpWorker)")
         ucxEventLoop.addChannel(this)
     }
     
     override
     protected def doDeregister(): Unit = {
-        logDev(s"doDeregister() $this to $ucxEventLoop($ucxEventLoop.ucpWorker)")
         ucxEventLoop.delChannel(this)
     }
 
@@ -367,13 +356,11 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     override
     protected def doDisconnect(): Unit = {
-        logDev(s"doDisconnect()")
         doClose()
     }
 
     override
     protected final def doBeginRead(): Unit = {
-        logDev(s"doBeginRead()")
     }
 
     override

@@ -97,7 +97,7 @@ class NettyUcxTransportServer(
     val bossGroup = new UcxEventLoopGroup(1, bossThreadFactory)
 
     val workerPoolPrefix = "UCX-shuffle-server"
-    val numCores = conf.serverThreads()
+    val numCores = conf.serverThreads() * 2
     val workerThreadFactory = new DefaultThreadFactory(workerPoolPrefix, true).asInstanceOf[ThreadFactory]
     val workerGroup = new UcxEventLoopGroup(numCores, workerThreadFactory)
 

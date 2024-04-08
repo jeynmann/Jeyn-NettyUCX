@@ -68,7 +68,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     override
     protected def doConnect(remoteAddress: SocketAddress, localAddress: SocketAddress): Unit = {
         assert(eventLoop().inEventLoop())
-        logDev(s"doConnect() $localAddress -> $remoteAddress")
 
         ucxUnsafe.setSocketAddress(remoteAddress.asInstanceOf[java.net.InetSocketAddress])
         ucxUnsafe.doConnect0()
@@ -76,7 +75,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
     override
     protected def doWrite(in: ChannelOutboundBuffer): Unit = {
-        logDev(s"doWrite() $in")
         // write unfinished
         val spinLimit = config().getWriteSpinCount().min(in.size())
         for (i <- 0 until spinLimit) {
@@ -199,7 +197,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 override def onSuccess(r: UcpRequest): Unit = {
                     directBuf.writerIndex(readableBytes)
                     pipe.fireChannelRead(directBuf).fireChannelReadComplete()
-                    logTrace(s"Read MESSAGE from $remote success: $directBuf")
+                    logDev(s"Read MESSAGE from $remote success: $directBuf")
                 }
                 override def onError(status: Int, errorMsg: String): Unit = {
                     val e = new UcxException(s"Read MESSAGE from $remote fail: $errorMsg", status)
@@ -385,7 +383,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             try {
                 ucpEp = ucpWorker.newEndpoint(ucpEpParam)
 
-                logDebug(s"doConnect0 $local -> $remote")
+                logTrace(s"doConnect0 $local -> $remote")
 
                 // Tell remote which id this side uses.
                 val header = uniqueId.directBuffer()
@@ -398,7 +396,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                     UcpConstants.UCP_AM_SEND_FLAG_EAGER | UcpConstants.UCP_AM_SEND_FLAG_REPLY,
                     new UcxCallback() {
                         override def onSuccess(request: UcpRequest): Unit = {
-                            logDebug(s"$local CONNECT $remote: success")
+                            logTrace(s"$local CONNECT $remote: success")
                         }
                         override def onError(status: Int, errorMsg: String): Unit = {
                             // TODO raise error
@@ -438,7 +436,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                     new UcxCallback() {
                         override def onSuccess(request: UcpRequest): Unit = {
                             connectSuccess()
-                            logDebug(s"$local CONNECT_ACK $remote: success")
+                            logTrace(s"$local CONNECT_ACK $remote: success")
                         }
                         override def onError(status: Int, errorMsg: String): Unit = {
                             connectFailed(status, s"$local CONNECT_ACK $remote: $errorMsg")
@@ -544,7 +542,7 @@ class UcxSharedCallback(buf: ByteBuf, private var refCounts: Int,
     extends UcxCallback with UcxLogging {
     override def onSuccess(request: UcpRequest): Unit = {
         release()
-        logTrace(s"$local MESSAGE $remote: success")
+        logDev(s"$local MESSAGE $remote: success")
     }
 
     override def onError(status: Int, errorMsg: String): Unit = {

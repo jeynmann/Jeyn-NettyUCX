@@ -70,7 +70,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(nativeId)
 
-                        logDev(s"ucxHandleConnect() id $remoteId address $address")
                         copiedAddress.put(address)
                         channel.ucxHandleConnect(ep, remoteId, copiedAddress)
                         UcsConstants.STATUS.UCS_OK
@@ -91,7 +90,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        logDev(s"ucxHandleConnectAck() id $remoteId address $address")
                         copiedAddress.put(address)
                         channel.ucxHandleConnectAck(ep, remoteId, copiedAddress)
                         UcsConstants.STATUS.UCS_OK
@@ -189,7 +187,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                 ucpWorker.arm()
             } catch  {
                 case e: UcxException => {
-                    logDebug("worker arm:", e)
+                    logDev("worker arm:", e)
                     pendingWakeup = false
                 }
                 case e: Throwable =>

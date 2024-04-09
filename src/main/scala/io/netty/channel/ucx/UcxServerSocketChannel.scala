@@ -79,26 +79,14 @@ class UcxServerSocketChannel(parent: Channel)
     class UcxServerUnsafe extends AbstractUcxUnsafe {
         val ucpConnectHandler = new UcpListenerConnectionHandler {
             override def onConnectionRequest(request: UcpConnectionRequest) = {
-                setConnectionRequest(request)
-                doAccept0()
+                val childChannel = newChildChannel()
+                childChannel.ucxUnsafe.setConnectionRequest(request)
+                pipeline.fireChannelRead(childChannel)
             }
         }
 
         val ucpListenerParam = new UcpListenerParams().setConnectionHandler(ucpConnectHandler)
         var ucpListener: UcpListener = _
-
-        val ucpErrHandler = new UcpEndpointErrorHandler() {
-            override def onError(ep: UcpEndpoint, status: Int, errorMsg: String): Unit = {
-                if (status == UcsConstants.STATUS.UCS_ERR_CONNECTION_RESET) {
-                    logInfo(s"$ep: $errorMsg")
-                } else {
-                    logWarning(s"$ep: $errorMsg")
-                }
-                Option(ucxEventLoop.delChannel(ep.getNativeId())).foreach(
-                    _.ucxUnsafe.connectReset(status, errorMsg))
-            }
-        }
-        val ucpEpParam = new UcpEndpointParams()
 
         override
         def connect(
@@ -106,15 +94,6 @@ class UcxServerSocketChannel(parent: Channel)
             promise: ChannelPromise): Unit = {
             // Connect not supported by ServerChannel implementations
             promise.setFailure(new UnsupportedOperationException())
-        }
-
-        override
-        def setConnectionRequest(request: UcpConnectionRequest): Unit = {
-            val address = request.getClientAddress()
-            ucpEpParam.setConnectionRequest(request)
-                .setPeerErrorHandlingMode()
-                .setErrorHandler(ucpErrHandler)
-                .setName(s"Ep from ${address}")
         }
 
         override
@@ -126,30 +105,16 @@ class UcxServerSocketChannel(parent: Channel)
         override
         def dolisten0():Unit = {
             ucpListener = ucpWorker.newListener(ucpListenerParam)
+            uniqueId.set(ucpListener.getNativeId())
+            ucxEventLoop.addChannel(UcxServerSocketChannel.this)
             active = true
-        }
-
-        override
-        def doAccept0(): Unit = {
-            val childChannel = newChildChannel()
-            try {
-                val ep = ucpWorker.newEndpoint(ucpEpParam)
-
-                childChannel.ucxUnsafe.setUcpEp(ep)
-                ucxEventLoop.addChannel(ep.getNativeId(), childChannel)
-                pipeline.fireChannelRead(childChannel)
-
-                logDebug(s"accept $local <- $remote")
-            } catch {
-                case e: Throwable => childChannel.ucxUnsafe.connectFailed(
-                    UcsConstants.STATUS.UCS_ERR_IO_ERROR, "accept $local <- $remote: $e")
-            }
         }
 
         override
         def doClose0():Unit = {
             if (ucpListener != null) {
                 logDev(s"doClose0()")
+                ucxEventLoop.delChannel(ucpListener.getNativeId())
                 ucpListener.close()
                 ucpListener = null
             }

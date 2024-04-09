@@ -332,18 +332,20 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     class UcxClientUnsafe extends AbstractUcxUnsafe {
         val ucpErrHandler = new UcpEndpointErrorHandler() {
             override def onError(ep: UcpEndpoint, status: Int, errorMsg: String): Unit = {
-                logWarning(s"Connection to $remote: $errorMsg")
+                if (status == UcsConstants.STATUS.UCS_ERR_CONNECTION_RESET) {
+                    logInfo(s"$ep: $errorMsg")
+                } else {
+                    logWarning(s"$ep: $errorMsg")
+                }
                 opened = false
                 close(voidPromise())
+                ucxEventLoop.delChannel(ep.getNativeId())
             }
         }
 
         val ucpEpParam = new UcpEndpointParams()
+        var ucpEpAddress: ByteBuffer = _
         var ucpEp: UcpEndpoint = _
-
-        var actionEpAddress: ByteBuffer = _
-        var actionEpParam: UcpEndpointParams = _
-        var actionEp: UcpEndpoint = _
 
         private[ucx] def doWrite0(buf: ByteBuffer, writeCb: UcxCallback): Int = {
             doWrite0(UnsafeUtils.getAddress(buf), buf.position(), buf.limit(), writeCb)
@@ -353,7 +355,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             val header = remoteId.directBuffer()
 
             logDev(s"$local MESSAGE $remote: ongoing($address $offset $limit)")
-            actionEp.sendAmNonBlocking(
+            ucpEp.sendAmNonBlocking(
                 UcxAmId.MESSAGE,
                 UnsafeUtils.getAddress(header), header.remaining(),
                 address + offset, limit - offset, 0, writeCb,
@@ -379,32 +381,31 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
 
         override
-        def doConnect0(): Unit = {
+        def doAccept0(): Unit = {
             try {
+                logTrace(s"doAccept0 $local <- $remote")
+
                 ucpEp = ucpWorker.newEndpoint(ucpEpParam)
 
+                doExchangeId0()
+
+                local = ucpEp.getLocalAddress()
+            } catch {
+                case e: Throwable => {
+                    logError(s"ACCEPT $local <-x- $remote: $e $ucpEpParam")
+                    doClose0()
+                }
+            }
+        }
+
+        override
+        def doConnect0(): Unit = {
+            try {
                 logTrace(s"doConnect0 $local -> $remote")
 
-                // Tell remote which id this side uses.
-                val header = uniqueId.directBuffer()
-                val workerAddress = ucpWorker.getAddress()
+                ucpEp = ucpWorker.newEndpoint(ucpEpParam)
 
-                logDev(s"$local CONNECT $remote: ongoing")
-                ucpEp.sendAmNonBlocking(
-                    UcxAmId.CONNECT, UnsafeUtils.getAddress(header), header.remaining(),
-                    UnsafeUtils.getAddress(workerAddress), workerAddress.remaining(),
-                    UcpConstants.UCP_AM_SEND_FLAG_EAGER | UcpConstants.UCP_AM_SEND_FLAG_REPLY,
-                    new UcxCallback() {
-                        override def onSuccess(request: UcpRequest): Unit = {
-                            logTrace(s"$local CONNECT $remote: success")
-                        }
-                        override def onError(status: Int, errorMsg: String): Unit = {
-                            // TODO raise error
-                            connectFailed(status, s"$local CONNECT $remote: $errorMsg")
-                            workerAddress.clear()
-                            header.clear()
-                        }
-                    }, MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
+                doExchangeId0()
 
                 local = ucpEp.getLocalAddress()
             } catch {
@@ -415,46 +416,30 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             }
         }
 
-        override
-        def doConnectedBack0(): Unit = {
-            try {
-                actionEp = ucpWorker.newEndpoint(actionEpParam)
-                // Tell remote which id this side uses.
-                val headerSize = UnsafeUtils.LONG_SIZE + UnsafeUtils.LONG_SIZE
-                val header = ByteBuffer.allocateDirect(headerSize)
-                val headerAddress = UnsafeUtils.getAddress(header)
-                val workerAddress = ucpWorker.getAddress()
+        def doExchangeId0(): Unit = {
+            // Tell remote which id this side uses.
+            val nativeId = ucpEp.getNativeId()
+            val header = uniqueId.directBuffer()
 
-                header.putLong(remoteId.get())
-                header.putLong(uniqueId.get())
+            uniqueId.set(nativeId)
 
-                logDev(s"$local CONNECT_ACK $remote: ongoing")
-                actionEp.sendAmNonBlocking(
-                    UcxAmId.CONNECT_ACK, UnsafeUtils.getAddress(header), headerSize,
-                    UnsafeUtils.getAddress(workerAddress), workerAddress.remaining(),
-                    UcpConstants.UCP_AM_SEND_FLAG_EAGER | UcpConstants.UCP_AM_SEND_FLAG_REPLY,
-                    new UcxCallback() {
-                        override def onSuccess(request: UcpRequest): Unit = {
-                            connectSuccess()
-                            logTrace(s"$local CONNECT_ACK $remote: success")
-                        }
-                        override def onError(status: Int, errorMsg: String): Unit = {
-                            connectFailed(status, s"$local CONNECT_ACK $remote: $errorMsg")
-                            workerAddress.clear()
-                            header.clear()
-                        }
-                    }, MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
-            } catch {
-                case e: Throwable => {
-                    logError(s"CONNECT_ACK $local -> $remote: $e")
-                    doClose0()
-                }
-            }
-        }
+            logDev(s"$local CONNECT $remote: ongoing")
+            ucpEp.sendAmNonBlocking(
+                UcxAmId.CONNECT, UnsafeUtils.getAddress(header), header.remaining(),
+                UnsafeUtils.getAddress(header), 0,
+                UcpConstants.UCP_AM_SEND_FLAG_EAGER | UcpConstants.UCP_AM_SEND_FLAG_REPLY,
+                new UcxCallback() {
+                    override def onSuccess(request: UcpRequest): Unit = {
+                        logTrace(s"$local CONNECT $remote: success")
+                    }
+                    override def onError(status: Int, errorMsg: String): Unit = {
+                        // TODO raise error
+                        connectFailed(status, s"$local CONNECT $remote: $errorMsg")
+                        header.clear()
+                    }
+                }, MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
 
-        override
-        def doConnectDone0(): Unit = {
-            connectSuccess()
+            ucxEventLoop.addChannel(nativeId, UcxSocketChannel.this)
         }
 
         override
@@ -470,15 +455,31 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         private[ucx] def shutdownOut0(promise: ChannelPromise): Unit = {
             bOutputShutdown = true
 
-            if (actionEp != null) {
-                val closing = actionEp.closeNonBlockingFlush()
+            if (ucpEp != null) {
+                ucxEventLoop.delChannel(ucpEp.getNativeId())
+                val closing = if (ucpEpAddress == null) {
+                    ucpEp.closeNonBlockingForce()
+                } else {
+                    ucpEp.closeNonBlockingFlush()
+                }
                 while (!closing.isCompleted) {
                     ucpWorker.progress()
                 }
-                actionEp = null
+                ucpEp = null
             }
 
             promise.setSuccess()
+        }
+
+        override
+        def setConnectionRequest(request: UcpConnectionRequest): Unit = {
+            val address = request.getClientAddress()
+            ucpEpParam.setConnectionRequest(request)
+                .setPeerErrorHandlingMode()
+                .setErrorHandler(ucpErrHandler)
+                .setName(s"Ep from ${address}")
+            connectPromise = newPromise()
+            remote = address
         }
 
         override
@@ -486,38 +487,16 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             ucpEpParam.setSocketAddress(address)
                 .setPeerErrorHandlingMode()
                 .setErrorHandler(ucpErrHandler)
-                .setName(s"Ep to ${remote}")
+                .setName(s"Ep to ${address}")
             remote = address
         }
 
         override
         def setUcpAddress(address: ByteBuffer): Unit = {
-            actionEpParam = new UcpEndpointParams().setUcpAddress(address)
+            ucpEpParam.setUcpAddress(address)
                 .setErrorHandler(ucpErrHandler)
-                .setName(s"ActionEp to ${remote}")
-            actionEpAddress = address
-        }
-
-        override
-        def setActionEp(endpoint: UcpEndpoint): Unit = {
-            actionEp = endpoint
-        }
-
-        override
-        def setUcpEp(endpoint: UcpEndpoint): Unit = {
-            connectPromise = newPromise()
-            remote = endpoint.getRemoteAddress()
-            local = endpoint.getLocalAddress()
-            ucpEp = endpoint
-        }
-
-        override
-        def connectFailed(status: Int, errorMsg: String): Unit = {
-            opened = false
-            val e = new UcxException(errorMsg, status)
-            if (connectPromise != null && connectPromise.tryFailure(e)) {
-                close(voidPromise())
-            }
+                .setName(s"ActionEp to ${address}")
+            ucpEpAddress = address
         }
 
         override
@@ -531,8 +510,24 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
 
         override
+        def connectFailed(status: Int, errorMsg: String): Unit = {
+            opened = false
+            val e = new UcxException(errorMsg, status)
+            if (connectPromise != null && connectPromise.tryFailure(e)) {
+                close(voidPromise())
+            }
+        }
+
+        override
         def connectReset(status: Int, errorMsg: String): Unit = {
-            ucpErrHandler.onError(actionEp, status, errorMsg)
+            ucpErrHandler.onError(ucpEp, status, errorMsg)
+        }
+    }
+
+    override
+    def doRegister(): Unit = {
+        if (parent != null) {
+            underlyingUnsafe.doAccept0()
         }
     }
 }

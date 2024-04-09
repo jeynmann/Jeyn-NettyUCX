@@ -28,7 +28,6 @@ import org.openucx.jucx.ucs.UcsConstants
 
 object UcxAmId {
     final val CONNECT = 0
-    final val CONNECT_ACK = 1
     final val MESSAGE = 2
 }
 
@@ -64,34 +63,11 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                     headerAddress: Long, headerSize: Long, amData: UcpAmData,
                     ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
-                        val address = UnsafeUtils.getByteBufferView(amData.getDataAddress, amData.getLength.toInt)
-                        val copiedAddress = ByteBuffer.allocateDirect(address.remaining())
                         val nativeId = ep.getNativeId()
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(nativeId)
 
-                        copiedAddress.put(address)
-                        channel.ucxHandleConnect(ep, remoteId, copiedAddress)
-                        UcsConstants.STATUS.UCS_OK
-                    }
-            },
-            UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
-
-        ucpWorker.setAmRecvHandler(
-            UcxAmId.CONNECT_ACK,
-            new UcpAmRecvCallback {
-                override def onReceive(
-                    headerAddress: Long, headerSize: Long, amData: UcpAmData,
-                    ep: UcpEndpoint): Int = {
-                        val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
-                        val address = UnsafeUtils.getByteBufferView(amData.getDataAddress, amData.getLength.toInt)
-                        val copiedAddress = ByteBuffer.allocateDirect(address.remaining())
-                        val uniqueId = header.getLong
-                        val remoteId = header.getLong
-                        val channel = ucxChannels.get(uniqueId)
-
-                        copiedAddress.put(address)
-                        channel.ucxHandleConnectAck(ep, remoteId, copiedAddress)
+                        channel.ucxHandleConnect(ep, remoteId)
                         UcsConstants.STATUS.UCS_OK
                     }
             },

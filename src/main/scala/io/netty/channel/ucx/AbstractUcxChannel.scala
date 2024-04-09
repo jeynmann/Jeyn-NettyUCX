@@ -92,16 +92,9 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     def ucxRead(ucpAmData: UcpAmData): Unit = doReadAmData(ucpAmData)
 
-    def ucxHandleConnect(ep: UcpEndpoint, remoteId: Long, address: ByteBuffer): Unit = {
+    def ucxHandleConnect(ep: UcpEndpoint, remoteId: Long): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
-        ucxUnsafe.setUcpAddress(address)
-        eventLoopRun(ucxUnsafe.doConnectedBack0 _)
-    }
-
-    def ucxHandleConnectAck(ep: UcpEndpoint, remoteId: Long, address: ByteBuffer): Unit = {
-        ucxUnsafe.remoteId.set(remoteId)
-        ucxUnsafe.setActionEp(ep)
-        ucxUnsafe.doConnectDone0()
+        ucxUnsafe.connectSuccess()
     }
 
     override
@@ -252,14 +245,6 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             throw new UnsupportedOperationException()
         }
 
-        def setActionEp(endpoint: UcpEndpoint): Unit = {
-            throw new UnsupportedOperationException()
-        }
-
-        def setUcpEp(endpoint: UcpEndpoint): Unit = {
-            throw new UnsupportedOperationException()
-        }
-
         def setUcpAddress(address: ByteBuffer): Unit = {
             throw new UnsupportedOperationException()
         }
@@ -276,23 +261,15 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
             throw new UnsupportedOperationException()
         }
 
-        def doConnectedBack0(): Unit = {
-            throw new UnsupportedOperationException()
-        }
-
-        def doConnectDone0(): Unit = {
-            throw new UnsupportedOperationException()
-        }
-
         def doClose0(): Unit = {
             throw new UnsupportedOperationException()
         }
 
-        def connectFailed(status: Int, errorMsg: String): Unit = {
+        def connectSuccess(): Unit = {
             throw new UnsupportedOperationException()
         }
 
-        def connectSuccess(): Unit = {
+        def connectFailed(status: Int, errorMsg: String): Unit = {
             throw new UnsupportedOperationException()
         }
 
@@ -341,12 +318,12 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     override
     protected def doRegister(): Unit = {
-        ucxEventLoop.addChannel(this)
+        // ucxEventLoop.addChannel(this)
     }
     
     override
     protected def doDeregister(): Unit = {
-        ucxEventLoop.delChannel(this)
+        // ucxEventLoop.delChannel(this)
     }
 
     override

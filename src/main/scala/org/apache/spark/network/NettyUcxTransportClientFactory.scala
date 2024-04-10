@@ -128,7 +128,7 @@ class NettyUcxTransportClientFactory(
     // Get connection from the connection pool first.
     // If it is not found or not active, create a new one.
     // Use unresolved address here to avoid DNS resolution each time we creates a client.
-    val unresolvedAddress = InetSocketAddress.createUnresolved(remoteHost, remotePort + 1)
+    val unresolvedAddress = InetSocketAddress.createUnresolved(remoteHost, remotePort)
 
     // Create the UcxClientPool if we don't have it yet.
     var clientPool = connectionPool.get(unresolvedAddress)
@@ -159,7 +159,7 @@ class NettyUcxTransportClientFactory(
     // If we reach here, we don't have an existing connection open. Let's create a new one.
     // Multiple threads might race here to create new connections. Keep only one of them active.
     val preResolveHost = System.nanoTime()
-    val resolvedAddress = new InetSocketAddress(remoteHost, remotePort + 1)
+    val resolvedAddress = new InetSocketAddress(remoteHost, remotePort)
     val hostResolveTimeMs = (System.nanoTime() - preResolveHost) / 1000000
     if (hostResolveTimeMs > 2000) {
       logger.warn("DNS resolution for {} took {} ms", resolvedAddress, hostResolveTimeMs)
@@ -190,7 +190,7 @@ class NettyUcxTransportClientFactory(
    * As with {@link #createClient(String, Int)}, this method is blocking.
    */
   def createUnmanagedClient(remoteHost: String, remotePort: Int): TransportClient = {
-    val address = new InetSocketAddress(remoteHost, remotePort + 1)
+    val address = new InetSocketAddress(remoteHost, remotePort)
     return createClient(address)
   }
 

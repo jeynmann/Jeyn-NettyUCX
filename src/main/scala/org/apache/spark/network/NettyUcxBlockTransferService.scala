@@ -36,6 +36,7 @@ import org.apache.spark.network.server._
 import org.apache.spark.network.shuffle.{BlockFetchingListener, DownloadFileManager, OneForOneBlockFetcher, RetryingBlockFetcher}
 import org.apache.spark.network.shuffle.protocol.{UploadBlock, UploadBlockStream}
 import org.apache.spark.network.util.JavaUtils
+import org.apache.spark.shuffle.NettyUcxShuffleManager
 import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.storage.{BlockId, StorageLevel}
 import org.apache.spark.util.Utils
@@ -45,6 +46,7 @@ import org.apache.spark.util.Utils
  */
 class NettyUcxBlockTransferService (
     conf: SparkConf,
+    shuffleManager: NettyUcxShuffleManager,
     securityManager: SecurityManager,
     bindAddress: String,
     override val hostName: String,
@@ -112,7 +114,8 @@ class NettyUcxBlockTransferService (
     try {
       val blockFetchStarter = new RetryingBlockFetcher.BlockFetchStarter {
         override def createAndStart(blockIds: Array[String], listener: BlockFetchingListener) {
-          val client = clientFactory.createClient(host, port)
+          val ucxPort = shuffleManager.getUcxPort((host, port))
+          val client = clientFactory.createClient(host, ucxPort)
           new OneForOneBlockFetcher(client, appId, execId, blockIds, listener,
             transportConf, tempFileManager).start()
         }
@@ -144,7 +147,8 @@ class NettyUcxBlockTransferService (
       level: StorageLevel,
       classTag: ClassTag[_]): Future[Unit] = {
     val result = Promise[Unit]()
-    val client = clientFactory.createClient(hostname, port)
+    val ucxPort = shuffleManager.getUcxPort((hostname, port))
+    val client = clientFactory.createClient(hostname, ucxPort)
 
     // StorageLevel and ClassTag are serialized as bytes using our JavaSerializer.
     // Everything else is encoded using our binary protocol.
@@ -174,6 +178,10 @@ class NettyUcxBlockTransferService (
     }
 
     result.future
+  }
+
+  def connectUcxService(hostname: String, port: Int): Unit = {
+    clientFactory.createClient(hostname, port)
   }
 
   override def close(): Unit = {

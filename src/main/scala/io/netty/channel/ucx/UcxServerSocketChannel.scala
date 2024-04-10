@@ -99,12 +99,12 @@ class UcxServerSocketChannel(parent: Channel)
         override
         def setSocketAddress(address: InetSocketAddress): Unit = {
             ucpListenerParam.setSockAddr(address)
-            local = address
         }
 
         override
         def dolisten0():Unit = {
             ucpListener = ucpWorker.newListener(ucpListenerParam)
+            local = ucpListener.getAddress()
             uniqueId.set(ucpListener.getNativeId())
             ucxEventLoop.addChannel(UcxServerSocketChannel.this)
             active = true

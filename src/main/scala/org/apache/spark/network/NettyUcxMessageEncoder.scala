@@ -148,7 +148,7 @@ class UcxMessageWithHeader(managedBuffer: ManagedBuffer, header: ByteBuf,
         val fileCh = UcxDefaultFileRegionMsg.getChannel(fr)
         val byteBuf = ucxCh.internalByteBuf()
         val length = fr.count() - fr.transferred()
-        UcxDefaultFileRegionMsg.copyDefaultFileRegion(fileCh, offset, length, byteBuf)
+        UcxDefaultFileRegionMsg.readDefaultFileRegion(fileCh, offset, length, byteBuf)
 
         // logger.info(s"fr ${fr.position} ${fr.transferred}")
         // move forward the flags of DefaultFileRegion

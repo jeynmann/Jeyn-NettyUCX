@@ -603,7 +603,7 @@ class UcxDefaultFileRegionMsg(fr: DefaultFileRegion, allocator: ByteBufAllocator
         val directBuf = UcxPooledByteBufAllocator.directBuffer(
             allocator, readableBytes, readableBytes)
 
-        UcxDefaultFileRegionMsg.copyDefaultFileRegion(fileChannel, offset, length,
+        UcxDefaultFileRegionMsg.readDefaultFileRegion(fileChannel, offset, length,
                                                       directBuf)
         return directBuf
     }
@@ -630,19 +630,7 @@ object UcxDefaultFileRegionMsg {
 
     def readDefaultFileRegion(fileChannel: FileChannel, offset: Long,
                               length: Long, directBuf: ByteBuf): Unit = {
-        // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
-
-        fileChannel.position(offset)
-
-        val writerIndex = directBuf.writerIndex()
-        if (directBuf.nioBufferCount() == 1) {
-            val nioBuf = directBuf.internalNioBuffer(writerIndex, length.toInt)
-            fileChannel.read(nioBuf)
-        } else {
-            fileChannel.read(directBuf.nioBuffers(writerIndex, length.toInt))
-        }
-
-        directBuf.writerIndex(writerIndex + length.toInt)
+        directBuf.writeBytes(fileChannel, offset, length.toInt)
     }
 }
 

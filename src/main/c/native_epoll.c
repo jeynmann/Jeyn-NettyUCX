@@ -195,7 +195,7 @@ JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeFree(JNIEn
     free((void*) address);
 }
 
-JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcopy(JNIEnv* env, jclass clazz, jlong dest, jlong src, jlong size) {
+JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy(JNIEnv* env, jclass clazz, jlong dest, jlong src, jlong size) {
     memcpy((void*) dest, (void*) src, size);
 }
 

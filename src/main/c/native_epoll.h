@@ -217,10 +217,10 @@ JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeMemcopy
+ * Method:    nativeMemcpy
  * Signature: (JJJ)V
  */
-JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcopy
+JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy
   (JNIEnv *, jclass, jlong, jlong, jlong);
 
 #ifdef __cplusplus

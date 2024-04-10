@@ -40,7 +40,7 @@ class NativeEpollApi {
     static native long nativeMalloc(long size);
     static native void nativeFree(long address);
     static native void nativeClose(int fd);
-    static native void nativeMemcopy(long dest, long src, long size);
+    static native void nativeMemcpy(long dest, long src, long size);
 
     private static File extractDir = null;
     private static final String NATIVE_RESOURCE_HOME = "META-INF/native/";
@@ -278,7 +278,7 @@ public class NativeEpoll extends NativeEpollApi {
         nativeFree(address);
     }
 
-    public static void memcopy(long dest, long src, long size) {
-        nativeMemcopy(dest, src, size);
+    public static void memcpy(long dest, long src, long size) {
+        nativeMemcpy(dest, src, size);
     }
 }

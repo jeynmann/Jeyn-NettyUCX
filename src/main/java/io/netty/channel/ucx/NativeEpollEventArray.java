@@ -13,7 +13,7 @@ public class NativeEpollEventArray {
         int newlength = length << 1;
         long newAddress = create(newlength);
 
-        NativeEpoll.memcopy(newAddress, address, length);
+        NativeEpoll.memcpy(newAddress, address, length);
 
         length = newlength;
         address = newAddress;

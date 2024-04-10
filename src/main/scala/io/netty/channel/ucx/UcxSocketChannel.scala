@@ -623,6 +623,14 @@ object UcxDefaultFileRegionMsg {
     def copyDefaultFileRegion(fileChannel: FileChannel, offset: Long,
                               length: Long, directBuf: ByteBuf): Unit = {
         // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
+        val mapBuf = fileChannel.map(FileChannel.MapMode.READ_ONLY,
+                                     offset, length)
+        directBuf.writeBytes(mapBuf)
+    }
+
+    def readDefaultFileRegion(fileChannel: FileChannel, offset: Long,
+                              length: Long, directBuf: ByteBuf): Unit = {
+        // TODO: val maxWrite = 16 << 20 // .min(maxWrite)
 
         fileChannel.position(offset)
 

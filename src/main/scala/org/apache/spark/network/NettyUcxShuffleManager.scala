@@ -117,14 +117,17 @@ class NettyUcxShuffleManager(val conf: SparkConf, isDriver: Boolean)
         ucxCores)
 
       shuffleService.init(env.blockManager)
-      blockTransferService.set(shuffleService)
 
       executorEndpoint = new UcxExecutorRpcEndpoint(rpcEnv, NettyUcxShuffleManager.this)
       val endpoint = rpcEnv.setupEndpoint(s"UCX-${blockManagerId.executorId}",
                                           executorEndpoint)
       var driverEndpointRef: RpcEndpointRef = null
       sleepUntil(() => {
-        driverEndpointRef = RpcUtils.makeDriverRef(ucxDriver, conf, rpcEnv)
+        try {
+          driverEndpointRef = RpcUtils.makeDriverRef(ucxDriver, conf, rpcEnv)
+        } catch {
+          case _: SparkException => {}
+        }
         driverEndpointRef != null
       }, 10000, 10, "get ucxDriver timeout")
 
@@ -139,6 +142,7 @@ class NettyUcxShuffleManager(val conf: SparkConf, isDriver: Boolean)
 
       logInfo(s"start shuffle service: success.")
 
+      blockTransferService.set(shuffleService)
       shuffleService
     }
   })

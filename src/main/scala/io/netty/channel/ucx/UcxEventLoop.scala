@@ -24,7 +24,7 @@ import io.netty.util.internal.SystemPropertyUtil
 
 import org.openucx.jucx.UcxException
 import org.openucx.jucx.ucp._
-import org.openucx.jucx.ucs.UcsConstants
+import org.openucx.jucx.ucs.UcsConstants.STATUS
 
 object UcxAmId {
     final val CONNECT = 0
@@ -49,6 +49,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     private val ucpWorkerParams = new UcpWorkerParams().requestThreadSafety()
 
     private[ucx] var ucpWorker: UcpWorker = _
+    private[ucx] var ucpWorkerId: Long = _
     private[ucx] var ucpWorkerFd: Int = _
 
     def ucxEventLoopGroup = parent.asInstanceOf[UcxEventLoopGroup]
@@ -68,7 +69,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val channel = ucxChannels.get(nativeId)
 
                         channel.ucxHandleConnect(ep, remoteId)
-                        UcsConstants.STATUS.UCS_OK
+                        STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
@@ -84,7 +85,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val channel = ucxChannels.get(uniqueId)
 
                         channel.ucxRead(amData)
-                        UcsConstants.STATUS.UCS_OK
+                        STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
@@ -156,6 +157,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
         var success = false
         try {
             ucpWorker = createUcpWorker(ucpWorkerParams)
+            ucpWorkerId = ucpWorker.getNativeId()
             ucpWorkerFd = ucpWorker.getEventFD()
 
             epollFd = NativeEpoll.newEpoll()
@@ -386,13 +388,8 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     // Returns true if a timerFd event was encountered
     private def processReady(): Unit = {
         while (ucpWorker.progress() != 0) {}
-        try {
-            ucpWorker.arm()
-            pendingWakeup = true
-        } catch {
-            // if device is busy, we need to progress again
-            case e: UcxException => pendingWakeup = false
-        }
+
+        pendingWakeup = (NativeEpoll.ucpWorkerArm(ucpWorkerId) == STATUS.UCS_OK)
     }
 
     override

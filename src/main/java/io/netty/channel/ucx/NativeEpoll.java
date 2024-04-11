@@ -42,6 +42,8 @@ class NativeEpollApi {
     static native void nativeClose(int fd);
     static native void nativeMemcpy(long dest, long src, long size);
 
+    static native int nativeUcpWorkerArm(long nativeId);
+
     private static File extractDir = null;
     private static final String NATIVE_RESOURCE_HOME = "META-INF/native/";
     private static final String NAME = "native_epoll";
@@ -151,11 +153,12 @@ public class NativeEpoll extends NativeEpollApi {
         return efd;
     }
 
-    public static void eventFdRead(int efd) throws IOException {
+    public static int eventFdRead(int efd) throws IOException {
         int res = nativeEventFdRead(efd);
         if (res < 0) {
             throw new IOException("eventfd_read: " + res);
         }
+        return res;
     }
 
     public static void eventFdWrite(int efd, long val) throws IOException {
@@ -280,5 +283,9 @@ public class NativeEpoll extends NativeEpollApi {
 
     public static void memcpy(long dest, long src, long size) {
         nativeMemcpy(dest, src, size);
+    }
+
+    public static int ucpWorkerArm(long nativeId) {
+        return nativeUcpWorkerArm(nativeId);
     }
 }

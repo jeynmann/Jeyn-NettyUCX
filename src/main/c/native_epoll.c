@@ -18,6 +18,7 @@
 #include <link.h>
 #include <time.h>
 #include <sys/syscall.h>
+#include <ucp/api/ucp.h>
 
 // try epoll_create1
 extern int epoll_create1(int flags) __attribute__((weak));
@@ -28,7 +29,16 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeEventFd(JN
 
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeEventFdRead(JNIEnv* env, jclass clazz, jint fd) {
     uint64_t _;
-    return eventfd_read(fd, &_);
+    jint ret = eventfd_read(fd, &_);
+    if (ret == 0) {
+        return ret;
+    }
+
+    if (ret < 0 && errno != EAGAIN) {
+        return -errno;
+    }
+
+    return EAGAIN;
 }
 
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeEventFdWrite(JNIEnv* env, jclass clazz, jint fd, jlong value) {
@@ -42,12 +52,12 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeEventFdWri
         }
 
         if (ret < 0 && errno != EAGAIN) {
-            return ret;
+            return -errno;
         }
 
         ret = eventfd_read(fd, &_);
         if (ret < 0 && errno != EAGAIN) {
-            return ret;
+            return -errno;
         }
     }
 
@@ -201,4 +211,8 @@ JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy(JNI
 
 JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose(JNIEnv* env, jclass clazz, jint fd) {
     close(fd);
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeUcpWorkerArm(JNIEnv* env, jclass clazz, jlong ucp_worker_ptr) {
+    return (jint) ucp_worker_arm((ucp_worker_h) ucp_worker_ptr);
 }

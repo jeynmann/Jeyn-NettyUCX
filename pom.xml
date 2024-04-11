@@ -31,8 +31,8 @@ See file LICENSE for terms.
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
     <osmaven.version>1.6.2</osmaven.version>
-    <jni.cflags>CFLAGS=-O3 -Werror -fvisibility=hidden -pipe</jni.cflags>
-    <jni.ldflags>LDFLAGS=-Wl,--no-as-needed -Wl,--whole-archive -Wl,--no-whole-archive -pipe</jni.ldflags>
+    <jni.cflags>CFLAGS=-O3 -pipe -Werror -fvisibility=hidden</jni.cflags>
+    <jni.ldflags>LDFLAGS=-O3 -pipe -lucp -Wl,--no-as-needed -Wl,--whole-archive -Wl,--no-whole-archive</jni.ldflags>
     <jni.src>${project.basedir}/src/main/c</jni.src>
     <encoding>UTF-8</encoding>
   </properties>

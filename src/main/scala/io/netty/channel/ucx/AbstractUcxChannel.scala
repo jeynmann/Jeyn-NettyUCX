@@ -92,6 +92,9 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     def ucxRead(ucpAmData: UcpAmData): Unit = doReadAmData(ucpAmData)
 
+    def ucxReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int, frameId: Int): Unit =
+        doReadStream(ucpAmData, streamId, frameNum, frameId)
+
     def ucxHandleConnect(ep: UcpEndpoint, remoteId: Long): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
         ucxUnsafe.connectSuccess()
@@ -351,6 +354,10 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     }
 
     protected def doReadAmData(ucpAmData: UcpAmData): Unit = {
+        throw new UnsupportedOperationException()
+    }
+
+    protected def doReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int, frameId: Int): Unit = {
         throw new UnsupportedOperationException()
     }
 

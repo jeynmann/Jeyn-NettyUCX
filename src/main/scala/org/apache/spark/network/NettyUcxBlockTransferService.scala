@@ -114,7 +114,7 @@ class NettyUcxBlockTransferService (
     try {
       val blockFetchStarter = new RetryingBlockFetcher.BlockFetchStarter {
         override def createAndStart(blockIds: Array[String], listener: BlockFetchingListener) {
-          val ucxPort = shuffleManager.getUcxPort((host, port))
+          val ucxPort = shuffleManager.getUcxPort(execId)
           val client = clientFactory.createClient(host, ucxPort)
           new OneForOneBlockFetcher(client, appId, execId, blockIds, listener,
             transportConf, tempFileManager).start()
@@ -147,7 +147,7 @@ class NettyUcxBlockTransferService (
       level: StorageLevel,
       classTag: ClassTag[_]): Future[Unit] = {
     val result = Promise[Unit]()
-    val ucxPort = shuffleManager.getUcxPort((hostname, port))
+    val ucxPort = shuffleManager.getUcxPort(execId)
     val client = clientFactory.createClient(hostname, ucxPort)
 
     // StorageLevel and ClassTag are serialized as bytes using our JavaSerializer.
@@ -192,4 +192,9 @@ class NettyUcxBlockTransferService (
       clientFactory.close()
     }
   }
+}
+
+object NettyUcxBlockTransferService {
+  val FILE_FRAME_SIZE_KEY = "spark.shuffle.io.fileFrameSize"
+  val FILE_FRAME_SIZE_DEFAULT = 32 << 10
 }

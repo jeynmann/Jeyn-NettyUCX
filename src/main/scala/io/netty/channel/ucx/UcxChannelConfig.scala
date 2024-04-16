@@ -8,6 +8,7 @@ import io.netty.channel.socket.ServerSocketChannelConfig
 import io.netty.channel.socket.SocketChannelConfig
 
 import io.netty.buffer.ByteBufAllocator
+import io.netty.buffer.UcxPooledByteBufAllocator
 
 class UcxChannelConfig(channel: AbstractUcxChannel)
     extends DefaultChannelConfig(channel) {
@@ -16,6 +17,7 @@ class UcxChannelConfig(channel: AbstractUcxChannel)
 class UcxServerSocketChannelConfig(channel: AbstractUcxChannel)
     extends UcxChannelConfig(channel)
     with ServerSocketChannelConfig {
+    setAllocator(UcxPooledByteBufAllocator.DEFAULT)
 
     override def setConnectTimeoutMillis(connectTimeoutMillis: Int): this.type = {
         super.setConnectTimeoutMillis(connectTimeoutMillis)
@@ -33,6 +35,7 @@ class UcxServerSocketChannelConfig(channel: AbstractUcxChannel)
     }
 
     override def setAllocator(allocator: ByteBufAllocator): this.type = {
+        assert(allocator.isInstanceOf[UcxPooledByteBufAllocator])
         super.setAllocator(allocator)
         this
     }
@@ -107,6 +110,7 @@ class UcxServerSocketChannelConfig(channel: AbstractUcxChannel)
 class UcxSocketChannelConfig(channel: AbstractUcxChannel)
     extends UcxChannelConfig(channel)
     with SocketChannelConfig {
+    setAllocator(UcxPooledByteBufAllocator.DEFAULT)
 
     override def setConnectTimeoutMillis(connectTimeoutMillis: Int): this.type = {
         super.setConnectTimeoutMillis(connectTimeoutMillis)
@@ -124,6 +128,7 @@ class UcxSocketChannelConfig(channel: AbstractUcxChannel)
     }
 
     override def setAllocator(allocator: ByteBufAllocator): this.type = {
+        assert(allocator.isInstanceOf[UcxPooledByteBufAllocator])
         super.setAllocator(allocator)
         this
     }
@@ -170,6 +175,8 @@ class UcxSocketChannelConfig(channel: AbstractUcxChannel)
     def getSoLinger(): Int = soLinger
 
     def getTrafficClass(): Int = trafficClass
+
+    def getFileFrameSize(): Int = fileFrameSize
 
     def isAllowHalfClosure(): Boolean = allowHalfClosure
 
@@ -224,7 +231,13 @@ class UcxSocketChannelConfig(channel: AbstractUcxChannel)
         this
     }
 
+    def setFileFrameSize(frameSize: Int): this.type = {
+        fileFrameSize = frameSize
+        this
+    }
 
+    private var fileFrameSize = 32 << 10
+    // private var fileFrameSize = 4 << 20
     private var receiveBufferSize = 0
     private var sendBufferSize = 0
     private var soLinger = 0

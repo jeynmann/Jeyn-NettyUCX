@@ -61,6 +61,7 @@ class NettyUcxMessageEncoder extends MessageToMessageEncoder[Message] {
           }
         }
       }
+
     }
 
     val msgType = in.`type`()
@@ -69,17 +70,43 @@ class NettyUcxMessageEncoder extends MessageToMessageEncoder[Message] {
     // sent.
     val headerLength = 8 + msgType.encodedLength() + in.encodedLength()
     val frameLength = headerLength + (if (isBodyInFrame) bodyLength else 0)
-    val header = ctx.alloc().heapBuffer(headerLength)
-    header.writeLong(frameLength)
-    msgType.encode(header)
-    in.encode(header)
-    assert(header.writableBytes() == 0)
+
+    def encodeHeader(header: ByteBuf): Unit = {
+      header.writeLong(frameLength)
+      msgType.encode(header)
+      in.encode(header)
+    }
 
     if (body != null) {
-      // We transfer ownership of the reference on in.body() to MessageWithHeader.
-      // This reference will be freed when MessageWithHeader.deallocate() is called.
+      val header = ctx.alloc().heapBuffer(headerLength)
+      encodeHeader(header)
       out.add(new UcxMessageWithHeader(in.body(), header, body, bodyLength))
+      // body match {
+      //   // TODO : support > 2G
+      //   case fr: DefaultFileRegion => {
+      //     val fileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
+      //     val fileOffset = fr.position() + fr.transferred()
+      //     val msg = ctx.alloc().directBuffer(headerLength + bodyLength.toInt)
+      //     encodeHeader(msg)
+      //     msg.writeBytes(fileChannel, fileOffset, bodyLength.toInt)
+      //     out.add(msg)
+      //   }
+      //   case buf: ByteBuf => {
+      //     val msg = ctx.alloc().directBuffer(headerLength + bodyLength.toInt)
+      //     encodeHeader(msg)
+      //     msg.writeBytes(buf)
+      //     out.add(msg)
+      //   }
+      //   case fr: FileRegion => {
+      //     val header = ctx.alloc().directBuffer(headerLength)
+      //     encodeHeader(header)
+      //     out.add(new UcxMessageWithHeader(in.body(), header, body, bodyLength))
+      //   }
+      //   case _ => throw new IllegalArgumentException(s"unsupported type: $body")
+      // }
     } else {
+      val header = ctx.alloc().directBuffer(headerLength)
+      encodeHeader(header)
       out.add(header)
     }
   }
@@ -95,6 +122,9 @@ class UcxMessageWithHeader(managedBuffer: ManagedBuffer, header: ByteBuf,
   extends MessageWithHeader(managedBuffer, header, body, bodyLength) {
   protected val headerLength = header.readableBytes()
   protected var totalBytesTransferred: Long = 0L
+  protected var bodyTransferred: Long = 0L
+
+  // private final val logger = LoggerFactory.getLogger(classOf[NettyUcxMessageEncoder])
 
   override def transferred(): Long = {
     return totalBytesTransferred
@@ -117,14 +147,15 @@ class UcxMessageWithHeader(managedBuffer: ManagedBuffer, header: ByteBuf,
     body match {
       case fr: DefaultFileRegion =>
         writtenBody = copyDefaultFileRegion(fr, target)
-      case fr: FileRegion =>
-        writtenBody = fr.transferTo(target, totalBytesTransferred - headerLength)
       case buf: ByteBuf =>
         writtenBody = copyByteBuf(buf, target)
+      case fr: FileRegion =>
+        writtenBody = fr.transferTo(target, totalBytesTransferred - headerLength)
       case _ => throw new IllegalArgumentException(s"unsupported type: $body")
     }
 
     totalBytesTransferred += writtenBody
+    bodyTransferred += writtenBody
 
     return writtenHeader + writtenBody
   }
@@ -137,17 +168,15 @@ class UcxMessageWithHeader(managedBuffer: ManagedBuffer, header: ByteBuf,
     }
   }
 
-  private final val logger = LoggerFactory.getLogger(classOf[NettyUcxMessageEncoder])
-
   protected def copyDefaultFileRegion(fr: DefaultFileRegion,
                                       target: WritableByteChannel): Long = {
-    val offset = fr.position() + fr.transferred()
+    val offset = fr.position() + fr.transferred() + bodyTransferred
 
     target match {
       case ucxCh: UcxWritableByteChannel => {
         val fileCh = UcxDefaultFileRegionMsg.getChannel(fr)
         val byteBuf = ucxCh.internalByteBuf()
-        val length = fr.count() - fr.transferred()
+        val length = byteBuf.writableBytes()
         UcxDefaultFileRegionMsg.readDefaultFileRegion(fileCh, offset, length, byteBuf)
 
         // logger.info(s"fr ${fr.position} ${fr.transferred}")
@@ -173,9 +202,7 @@ class UcxMessageWithHeader(managedBuffer: ManagedBuffer, header: ByteBuf,
     } else {
       val buffers = buf.nioBuffers(buf.readerIndex(), length)
       for (buffer <- buffers) {
-        val remaining = buffer.remaining()
-        val w = target.write(buffer)
-        written += w
+        written += target.write(buffer)
       }
     }
     buf.skipBytes(written)

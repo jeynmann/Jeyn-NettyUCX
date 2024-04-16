@@ -42,6 +42,7 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import org.apache.spark.network.TransportContext
+import org.apache.spark.network.netty.NettyUcxBlockTransferService
 import org.apache.spark.network.protocol.NettyUcxMessageEncoder
 import org.apache.spark.network.util._
 import java.util.concurrent.ThreadFactory
@@ -55,6 +56,9 @@ class NettyUcxTransportServer(
   appRpcHandler: RpcHandler,
   bootstraps: List[TransportServerBootstrap]) extends Closeable {
   private val logger = LoggerFactory.getLogger(classOf[NettyUcxTransportServer])
+  private val fileFrameSize = conf.getInt(
+    NettyUcxBlockTransferService.FILE_FRAME_SIZE_KEY,
+    NettyUcxBlockTransferService.FILE_FRAME_SIZE_DEFAULT)
   private var bootstrap: ServerBootstrap = _
   private var channelFuture: ChannelFuture = _
   private var port: Int = -1
@@ -115,24 +119,12 @@ class NettyUcxTransportServer(
     bootstrap = new ServerBootstrap()
       .group(bossGroup, workerGroup)
       .channel(classOf[UcxServerSocketChannel])
-      // .option(ChannelOption.SO_REUSEADDR, !SystemUtils.IS_OS_WINDOWS)
       .option(ChannelOption.ALLOCATOR, allocator)
       .childOption(ChannelOption.ALLOCATOR, allocator)
+      // .childOption(ChannelOption.FILE_FRAME_SIZE, fileFrameSize)
 
     this.metrics = new NettyMemoryMetrics(
       allocator, conf.getModuleName() + "-server", conf)
-
-    // if (conf.backLog() > 0) {
-    //   bootstrap.option(ChannelOption.SO_BACKLOG, conf.backLog())
-    // }
-
-    // if (conf.receiveBuf() > 0) {
-    //   bootstrap.childOption(ChannelOption.SO_RCVBUF, conf.receiveBuf())
-    // }
-
-    // if (conf.sendBuf() > 0) {
-    //   bootstrap.childOption(ChannelOption.SO_SNDBUF, conf.sendBuf())
-    // }
 
     bootstrap.childHandler(new ChannelInitializer[SocketChannel]() {
       override protected def initChannel(ch: SocketChannel) = {

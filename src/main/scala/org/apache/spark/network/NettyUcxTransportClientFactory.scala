@@ -47,6 +47,8 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import org.apache.spark.network.TransportContext
+import org.apache.spark.network.protocol.NettyUcxMessageEncoder
+import org.apache.spark.network.netty.NettyUcxBlockTransferService
 import org.apache.spark.network.server.TransportChannelHandler
 import org.apache.spark.network.util._
 
@@ -77,6 +79,9 @@ class NettyUcxTransportClientFactory(
   rand: Random) extends Closeable {
 
   private val logger = LoggerFactory.getLogger(classOf[NettyUcxTransportClientFactory])
+  private val fileFrameSize = conf.getInt(
+    NettyUcxBlockTransferService.FILE_FRAME_SIZE_KEY,
+    NettyUcxBlockTransferService.FILE_FRAME_SIZE_DEFAULT)
 
   private var socketChannelClass = classOf[UcxSocketChannel]
   private var workerGroup: EventLoopGroup = _
@@ -206,6 +211,7 @@ class NettyUcxTransportClientFactory(
       // .option(ChannelOption.SO_KEEPALIVE.asInstanceOf[ChannelOption[Any]], true)
       .option(ChannelOption.CONNECT_TIMEOUT_MILLIS.asInstanceOf[ChannelOption[Any]], conf.connectionTimeoutMs())
       .option(ChannelOption.ALLOCATOR, pooledAllocator)
+      // .option(ChannelOption.FILE_FRAME_SIZE, fileFrameSize)
 
     // if (conf.receiveBuf() > 0) {
     //   bootstrap.option(ChannelOption.SO_RCVBUF, conf.receiveBuf())
@@ -221,6 +227,8 @@ class NettyUcxTransportClientFactory(
     bootstrap.handler(new ChannelInitializer[SocketChannel]() {
       override def initChannel(ch: SocketChannel) = {
         val clientHandler = context.initializePipeline(ch)
+        // ch.pipeline().addAfter("encoder", "ucx_encoder", NettyUcxMessageEncoder.INSTANCE)
+        //   .remove("encoder")
         clientRef.set(clientHandler.getClient())
         channelRef.set(ch)
       }

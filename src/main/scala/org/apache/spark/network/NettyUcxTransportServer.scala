@@ -133,6 +133,7 @@ class NettyUcxTransportServer(
           rpcHandler = bootstrap.doBootstrap(ch, rpcHandler)
         }
         context.initializePipeline(ch, rpcHandler)
+        ch.asInstanceOf[UcxSocketChannel].config().setFileFrameSize(fileFrameSize)
         ch.pipeline().addAfter("encoder", "ucx_encoder", NettyUcxMessageEncoder.INSTANCE)
           .remove("encoder")
       }

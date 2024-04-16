@@ -88,7 +88,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             }
         }
 
-        if (in.size() != 0) {
+        if (!in.isEmpty()) {
             eventLoop().execute(flushTask)
         }
     }
@@ -137,7 +137,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             nioBuf.putInt(frameNums)
 
             val frameIdPos = headerSize - UnsafeUtils.INT_SIZE
-            val startId = fm.frameId()
             def processor(frameId: Int, buf: ByteBuf): Unit = {
                 val writeCb = newFrameUcxCallback(buf)
                 val body = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
@@ -145,13 +144,12 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 nioBuf.putInt(frameId).rewind()
                 underlyingUnsafe.doWriteFrame0(nioBuf, body, writeCb)
             }
-            fm.foreach(processor, spinLimit)
-            logDev(s"$local STREAM $remote: success($streamId-${fm.frameId()} ${fm.length})")
+            val spinNum = fm.forEachFrame(processor, spinLimit)
 
             if (fm.isEmpty) {
                 in.remove()
             }
-            return fm.frameId() - startId
+            return spinNum
         } finally {
             if (headerBuf != null) {
                 headerBuf.release()
@@ -182,8 +180,8 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         val readableBytes = buf.readableBytes()
         if (writeOnce) {
             if (hasAddress) {
-                underlyingUnsafe.doWrite0(buf.memoryAddress(), readerIndex,
-                                          buf.writerIndex(), writeCb)
+                val address = buf.memoryAddress() + readerIndex
+                underlyingUnsafe.doWrite0(address, readableBytes, writeCb)
             } else {
                 val nioBuf = buf.internalNioBuffer(readerIndex, readableBytes)
                 underlyingUnsafe.doWrite0(nioBuf, writeCb)
@@ -428,34 +426,29 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         var ucpEp: UcpEndpoint = _
 
         private[ucx] def doWrite0(buf: ByteBuffer, writeCb: UcxCallback): Int = {
-            doWrite0(UnsafeUtils.getAddress(buf), buf.position(), buf.limit(), writeCb)
+            val address = UnsafeUtils.getAddress(buf) + buf.position()
+            val length = buf.remaining()
+            doWrite0(address, length, writeCb)
         }
 
-        private[ucx] def doWrite0(address: Long, offset: Int, limit: Int, writeCb: UcxCallback): Int = {
+        private[ucx] def doWrite0(address: Long, length: Int, writeCb: UcxCallback): Int = {
             val header = remoteId.directBuffer()
 
-            logDev(s"$local MESSAGE $remote: ongoing($address $offset $limit)")
+            logDev(s"$local MESSAGE $remote: ongoing($address $length)")
             ucpEp.sendAmNonBlocking(
                 UcxAmId.MESSAGE,
                 UnsafeUtils.getAddress(header), header.remaining(),
-                address + offset, limit - offset, 0, writeCb,
-                MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
+                address, length, 0, writeCb, MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
             return 1
         }
 
-        private[ucx] def doWriteFrame0(
-            header: ByteBuffer, buf: ByteBuffer, 
-            writeCb: UcxCallback): Int = {
+        private[ucx] def doWriteFrame0(header: ByteBuffer, buf: ByteBuffer, 
+                                       writeCb: UcxCallback): Int = {
             val headerAddress = UnsafeUtils.getAddress(header) + header.position()
             val headerLength = header.remaining()
             val address = UnsafeUtils.getAddress(buf) + buf.position()
             val length = buf.remaining()
-            doWriteFrame0(headerAddress, headerLength, address, length, writeCb)
-        }
 
-        private[ucx] def doWriteFrame0(
-            headerAddress: Long, headerLength: Int, address: Long, length: Int,
-            writeCb: UcxCallback): Int = {
             // TODO UCP_AM_SEND_FLAG_COPY_HEADER
             logDev(s"$local STREAM $remote: ongoing($address $length)")
 

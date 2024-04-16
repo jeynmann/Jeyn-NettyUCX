@@ -32,7 +32,7 @@ class UcxFileRegionMsg(val fr: FileRegion, val ucxChannel: UcxSocketChannel,
 
     def frameId() = frameNow
 
-    def foreach(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Unit = {
+    def forEachFrame(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Int = {
         val frameLimit = (frameNow + spinLimit).min(frameNums)
         while (frameNow != frameLimit) {
             val currentSize = frameSize.min((length - position).toInt)
@@ -44,6 +44,7 @@ class UcxFileRegionMsg(val fr: FileRegion, val ucxChannel: UcxSocketChannel,
             position += currentSize
             frameNow += 1
         }
+        return frameLimit - frameNow
     }
 
     def forall(processor: ByteBuf => Unit): Unit = {
@@ -83,7 +84,7 @@ class UcxDefaultFileRegionMsg(override val fr: DefaultFileRegion,
              fr.count() - fr.transferred())
     }
 
-    override def foreach(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Unit = {
+    override def forEachFrame(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Int = {
         val frameLimit = (frameNow + spinLimit).min(frameNums)
         while (frameNow != frameLimit) {
             val currentSize = frameSize.min((length - position).toInt)
@@ -96,6 +97,7 @@ class UcxDefaultFileRegionMsg(override val fr: DefaultFileRegion,
             position += currentSize
             frameNow += 1
         }
+        return frameLimit - frameNow
     }
 
     override def forall(processor: ByteBuf => Unit): Unit = {

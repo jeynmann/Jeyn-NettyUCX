@@ -229,6 +229,7 @@ class NettyUcxTransportClientFactory(
         val clientHandler = context.initializePipeline(ch)
         // ch.pipeline().addAfter("encoder", "ucx_encoder", NettyUcxMessageEncoder.INSTANCE)
         //   .remove("encoder")
+        ch.asInstanceOf[UcxSocketChannel].config().setFileFrameSize(fileFrameSize)
         clientRef.set(clientHandler.getClient())
         channelRef.set(ch)
       }

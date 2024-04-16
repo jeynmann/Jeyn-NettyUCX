@@ -19,23 +19,30 @@ class UcxFileRegionMsg(val fr: FileRegion, val ucxChannel: UcxSocketChannel,
     protected val allocator = ucxChannel.config().getAllocator()
     assert(allocator.isInstanceOf[UcxPooledByteBufAllocator])
 
-    protected val frameSize = ucxChannel.config().getFileFrameSize()
-    protected val framePos = 0L until length by frameSize
+    val frameSize = ucxChannel.config().getFileFrameSize()
+    val frameNums = ((length - 1) / frameSize + 1).toInt
+    protected var position = 0L
+    protected var frameNow = 0
 
     def this(fr: FileRegion, ucxChannel: UcxSocketChannel) = {
         this(fr, ucxChannel, fr.transferred(), fr.count() - fr.transferred())
     }
 
-    def frameNum(): Int = framePos.size
+    def isEmpty() = position == length
 
-    def foreach(processor: ByteBuf => Unit): Unit = {
-        for(pos <- framePos) {
-            val currentSize = frameSize.min((length - pos).toInt)
+    def frameId() = frameNow
+
+    def foreach(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Unit = {
+        val frameLimit = (frameNow + spinLimit).min(frameNums)
+        while (frameNow != frameLimit) {
+            val currentSize = frameSize.min((length - position).toInt)
             val byteChannel = new UcxWritableByteChannel(allocator, currentSize)
 
-            fr.transferTo(byteChannel, pos + offset)
+            fr.transferTo(byteChannel, position + offset)
 
-            processor(byteChannel.internalByteBuf())
+            processor(frameNow, byteChannel.internalByteBuf())
+            position += currentSize
+            frameNow += 1
         }
     }
 
@@ -76,15 +83,18 @@ class UcxDefaultFileRegionMsg(override val fr: DefaultFileRegion,
              fr.count() - fr.transferred())
     }
 
-    override def foreach(processor: ByteBuf => Unit): Unit = {
-        for(pos <- framePos) {
-            val currentSize = frameSize.min((length - pos).toInt)
+    override def foreach(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Unit = {
+        val frameLimit = (frameNow + spinLimit).min(frameNums)
+        while (frameNow != frameLimit) {
+            val currentSize = frameSize.min((length - position).toInt)
             val directBuf = allocator.directBuffer(currentSize, currentSize)
 
             UcxDefaultFileRegionMsg.readDefaultFileRegion(
-                fileChannel, pos + offset, currentSize, directBuf)
+                fileChannel, position + offset, currentSize, directBuf)
 
-            processor(directBuf)
+            processor(frameNow, directBuf)
+            position += currentSize
+            frameNow += 1
         }
     }
 

@@ -39,7 +39,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     protected val flushTask = new Runnable() {
         override
         def run(): Unit = {
-            underlyingUnsafe.ucpWorker.progress()
             underlyingUnsafe.flush0()
         }
     }
@@ -74,21 +73,19 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     override
     protected def doWrite(in: ChannelOutboundBuffer): Unit = {
         // write unfinished
-        var spinLimit = config().getWriteSpinCount().min(in.size())
-        while (spinLimit != 0) {
+        var spinLimit = config().getWriteSpinCount()
+        while (!in.isEmpty() && spinLimit > 0) {
             val msg = in.current()
             msg match {
             case buf: ByteBuf =>
-                writeByteBuf(buf)
+                spinLimit -= writeByteBuf(in, buf)
             case fm: UcxFileRegionMsg =>
-                writeFileMessage(fm)
+                spinLimit -= writeFileMessage(in, fm, spinLimit)
             case _ =>
                 // Should never reach here.
                 throw new UnsupportedOperationException(
                     s"unsupported message type: ${msg.getClass}")
             }
-            in.remove()
-            spinLimit -= 1
         }
 
         if (in.size() != 0) {
@@ -109,17 +106,22 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
     }
 
-    protected def writeFileMessage(fm: UcxFileRegionMsg): Int = {
+    protected def writeFileMessage(in: ChannelOutboundBuffer, fm: UcxFileRegionMsg,
+                                   spinLimit: Int): Int = {
         var headerBuf: ByteBuf = null
         try {
-            val frameNum = fm.frameNum
-            if (frameNum == 0) {
+            if (fm.isEmpty) {
+                in.remove()
                 return 0
             }
-            if (frameNum == 1) {
+
+            val frameNums = fm.frameNums
+            if (frameNums == 1) {
                 fm.forall(doWriteByteBuf _)
+                in.remove()
                 return 1
             }
+
             val headerSize = UnsafeUtils.LONG_SIZE + UnsafeUtils.INT_SIZE +
                              UnsafeUtils.INT_SIZE + UnsafeUtils.INT_SIZE
 
@@ -132,21 +134,24 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
             nioBuf.putLong(underlyingUnsafe.remoteId.get)
             nioBuf.putInt(streamId)
-            nioBuf.putInt(frameNum)
+            nioBuf.putInt(frameNums)
 
             val frameIdPos = headerSize - UnsafeUtils.INT_SIZE
-            var frameId = 0
-            def processor(buf: ByteBuf): Unit = {
+            val startId = fm.frameId()
+            def processor(frameId: Int, buf: ByteBuf): Unit = {
                 val writeCb = newFrameUcxCallback(buf)
                 val body = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
                 nioBuf.position(frameIdPos)
                 nioBuf.putInt(frameId).rewind()
                 underlyingUnsafe.doWriteFrame0(nioBuf, body, writeCb)
-                frameId += 1
             }
-            fm.foreach(processor)
-            logDev(s"$local STREAM $remote: success($streamId-$frameId ${fm.length})")
-            return 1
+            fm.foreach(processor, spinLimit)
+            logDev(s"$local STREAM $remote: success($streamId-${fm.frameId()} ${fm.length})")
+
+            if (fm.isEmpty) {
+                in.remove()
+            }
+            return fm.frameId() - startId
         } finally {
             if (headerBuf != null) {
                 headerBuf.release()
@@ -154,15 +159,17 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
     }
 
-    protected def writeByteBuf(buf: ByteBuf): Int = {
+    protected def writeByteBuf(in: ChannelOutboundBuffer, buf: ByteBuf): Int = {
         if (buf.readableBytes() == 0) {
+            in.remove()
             return 0
         }
         // Increment refCounts here to let UcxCallback release
         buf.retain()
 
-        doWriteByteBuf(buf)
-        return 1
+        val spinNum = doWriteByteBuf(buf)
+        in.remove()
+        return spinNum
     }
 
     protected def doWriteByteBuf(buf: ByteBuf): Int = {
@@ -186,7 +193,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 underlyingUnsafe.doWrite0(_, writeCb))
         }
 
-        return 1
+        return nioBufferCount
     }
 
     protected def isBufferCopyNeededForWrite(byteBuf: ByteBuf): Boolean = {

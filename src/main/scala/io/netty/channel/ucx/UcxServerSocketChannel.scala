@@ -105,8 +105,10 @@ class UcxServerSocketChannel(parent: Channel)
         def dolisten0():Unit = {
             ucpListener = ucpWorker.newListener(ucpListenerParam)
             local = ucpListener.getAddress()
-            uniqueId.set(ucpListener.getNativeId())
-            ucxEventLoop.addChannel(UcxServerSocketChannel.this)
+
+            val nativeId = ucpListener.getNativeId()
+            uniqueId.set(nativeId)
+            ucxEventLoop.addChannel(nativeId, UcxServerSocketChannel.this)
             active = true
         }
 

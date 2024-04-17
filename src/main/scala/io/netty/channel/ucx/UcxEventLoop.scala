@@ -28,8 +28,8 @@ import org.openucx.jucx.ucs.UcsConstants.STATUS
 
 object UcxAmId {
     final val CONNECT = 0
-    final val STREAM = 1
-    final val MESSAGE = 2
+    final val MESSAGE = 1
+    final val STREAM = 2
 }
 
 /**
@@ -46,6 +46,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     logDev(s"UcxEventLoop() parent $parent executor $executor ucpContext $ucpContext")
 
     private val ucxChannels = new ConcurrentHashMap[Long, AbstractUcxChannel]
+    // private val ucpAmDatas = new scala.collection.mutable.ListBuffer[UcpAmData]
 
     private val ucpWorkerParams = new UcpWorkerParams().requestThreadSafety()
 
@@ -116,22 +117,8 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     /**
      * Register the given channel with this {@link EventLoop}.
      */
-    def addChannel(ch: AbstractUcxChannel): AbstractUcxChannel = {
-        addChannel(ch.ucxUnsafe.uniqueId.get, ch)
-    }
-
-    /**
-     * Register the given channel with this {@link EventLoop}.
-     */
     def addChannel(id: Long, ch: AbstractUcxChannel): AbstractUcxChannel = {
         ucxChannels.putIfAbsent(id, ch)
-    }
-
-    /**
-     * Deregister the given channel from this {@link EventLoop}.
-     */
-    def delChannel(ch: AbstractUcxChannel): AbstractUcxChannel = {
-        delChannel(ch.ucxUnsafe.uniqueId.get)
     }
 
     /**
@@ -141,10 +128,16 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
         ucxChannels.remove(id)
     }
 
+    // def addAmData(amData: UcpAmData) = {
+    //     ucpAmDatas += amData
+    // }
+
+    // def clearAmData(): Unit = {
+    //     ucpAmDatas.foreach(_.close())
+    // }
+
     private final var eventFd: Int = -1
     private final var epollFd: Int = -1
-    private final val channels = new scala.collection.concurrent.TrieMap[
-        InetSocketAddress, AbstractUcxChannel]
     private final var events: NativeEpollEventArray = _
 
     // // These are initialized on first use
@@ -164,7 +157,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     //    other value T    when EL is waiting with wakeup scheduled at time T
     private final val nextWakeupNanos = new AtomicLong(AWAKE)
     private var pendingWakeup: Boolean = true
-    @volatile private var ioRatio = 50
+    @volatile private var ioRatio = 5
 
     private final val AWAKE = -1L
     private final val NONE = Long.MaxValue
@@ -281,7 +274,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
 
     override
     def registeredChannels(): Int = {
-        return channels.size
+        return ucxChannels.size
     }
 
     private def epollWait(deadlineNanos: Long): Int = {
@@ -397,7 +390,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     private def closeAll() = {
         // Using the intermediate collection to prevent ConcurrentModificationException.
         // In the `close()` method, the channel is deleted from `channels` map.
-        channels.values.foreach(_.close())
+        ucxChannels.values.forEach(_.close())
         if (ucpWorker != null) {
             UcxEventLoop.localWorker.set(null)
             ucpWorker.close()
@@ -407,6 +400,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
 
     // Returns true if a timerFd event was encountered
     private def processReady(): Unit = {
+        // clearAmData()
         while (ucpWorker.progress() != 0) {}
 
         pendingWakeup = (NativeEpoll.ucpWorkerArm(ucpWorkerId) == STATUS.UCS_OK)

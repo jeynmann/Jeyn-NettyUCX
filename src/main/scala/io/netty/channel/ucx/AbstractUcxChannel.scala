@@ -3,7 +3,6 @@ package io.netty.channel.ucx
 import org.openucx.jucx.ucp._
 
 import io.netty.buffer.ByteBuf
-import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.channel.AbstractChannel
 import io.netty.channel.Channel
 import io.netty.channel.ChannelConfig

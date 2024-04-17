@@ -2,7 +2,6 @@ package io.netty.channel.ucx
 
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.CompositeByteBuf
-import io.netty.buffer.UcxPooledByteBufAllocator
 import io.netty.buffer.ByteBufAllocator
 import io.netty.channel.FileRegion
 import io.netty.channel.DefaultFileRegion

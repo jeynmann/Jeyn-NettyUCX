@@ -17,10 +17,9 @@ class UcxFileRegionMsg(val fr: FileRegion, val ucxChannel: UcxSocketChannel,
     extends AbstractReferenceCounted {
 
     protected val allocator = ucxChannel.config().getAllocator()
-    assert(allocator.isInstanceOf[UcxPooledByteBufAllocator])
 
     val frameSize = ucxChannel.config().getFileFrameSize()
-    val frameNums = ((length - 1) / frameSize + 1).toInt
+    val frameNums = (length.toInt - 1) / frameSize + 1
     protected var position = 0L
     protected var frameNow = 0
 

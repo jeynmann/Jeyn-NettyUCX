@@ -236,7 +236,7 @@ class UcxSocketChannelConfig(channel: AbstractUcxChannel)
         this
     }
 
-    private var fileFrameSize = 32 << 10
+    private var fileFrameSize = 4 << 20
     private var receiveBufferSize = 0
     private var sendBufferSize = 0
     private var soLinger = 0

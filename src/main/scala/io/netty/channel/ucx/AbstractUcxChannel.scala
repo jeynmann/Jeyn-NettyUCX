@@ -71,19 +71,24 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         this(null)
     }
 
-    def newDirectBuffer(buf: ByteBuf): ByteBuf = {
-        newDirectBuffer(buf, buf)
+    protected def isDirectOrEmpty(buf: ByteBuf): Boolean = {
+        return buf.isDirect() || buf.hasMemoryAddress() ||
+               (buf.readableBytes() == 0);
     }
 
-    def newDirectBuffer(holder: Object, buf: ByteBuf): ByteBuf = {
-        val readableBytes = buf.readableBytes()
-        if (readableBytes == 0) {
-            return io.netty.buffer.Unpooled.EMPTY_BUFFER
+    def toDirectBuffer(buf: ByteBuf): ByteBuf = {
+        if (isDirectOrEmpty(buf)) {
+            buf
+        } else {
+            toDirectBuffer(buf, buf)
         }
+    }
 
+    def toDirectBuffer(holder: Object, buf: ByteBuf): ByteBuf = {
         val allocator = config().getAllocator()
-        val directBuf = UcxPooledByteBufAllocator.directBuffer(
-            allocator, readableBytes, readableBytes)
+
+        val readableBytes = buf.readableBytes()
+        val directBuf = allocator.directBuffer(readableBytes, readableBytes)
 
         directBuf.writeBytes(buf, buf.readerIndex(), readableBytes)
         ReferenceCountUtil.safeRelease(holder)

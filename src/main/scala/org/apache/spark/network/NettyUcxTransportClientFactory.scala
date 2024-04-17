@@ -111,6 +111,7 @@ class NettyUcxTransportClientFactory(
       0, 0, 0, false
     )
     metrics = new NettyMemoryMetrics(pooledAllocator, clientPoolPrefix, conf)
+    logger.info("create factory with fileFrameSize {}", fileFrameSize)
   }
 
   def getAllMetrics(): MetricSet = metrics

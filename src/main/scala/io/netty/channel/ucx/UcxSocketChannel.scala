@@ -110,11 +110,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                                    spinLimit: Int): Int = {
         var headerBuf: ByteBuf = null
         try {
-            if (fm.isEmpty) {
-                in.remove()
-                return 0
-            }
-
             val frameNums = fm.frameNums
             if (frameNums == 1) {
                 fm.forall(doWriteByteBuf _)
@@ -194,26 +189,25 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         return nioBufferCount
     }
 
-    protected def isBufferCopyNeededForWrite(byteBuf: ByteBuf): Boolean = {
-        return !byteBuf.hasMemoryAddress() && !byteBuf.isDirect();
-    }
-
     override
     protected def filterOutboundMessage(msg: Object): Object = {
         msg match {
             case buf: ByteBuf => {
-                val buf = msg.asInstanceOf[ByteBuf]
-                if (isBufferCopyNeededForWrite(buf)) {
-                    newDirectBuffer(buf)
-                } else {
-                    buf
-                }
+                toDirectBuffer(buf)
             }
             case fr: DefaultFileRegion => {
-                new UcxDefaultFileRegionMsg(fr, this)
+                if (fr.count() == fr.transferred()) {
+                    io.netty.buffer.Unpooled.EMPTY_BUFFER
+                } else {
+                    new UcxDefaultFileRegionMsg(fr, this)
+                }
             }
             case fr: FileRegion => {
-                new UcxFileRegionMsg(fr, this)
+                if (fr.count() == fr.transferred()) {
+                    io.netty.buffer.Unpooled.EMPTY_BUFFER
+                } else {
+                    new UcxFileRegionMsg(fr, this)
+                }
             }
             case _ => 
                 throw new UnsupportedOperationException(
@@ -668,8 +662,6 @@ class StreamState(ucxChannel: UcxSocketChannel, streamId: Int, frameNum: Int,
     extends UcxCallback with UcxLogging {
 
     private[this] val alloc = ucxChannel.config().getAllocator()
-    assert(alloc.isInstanceOf[UcxPooledByteBufAllocator])
-
     private[this] val remote = ucxChannel.remoteAddress()
 
     private[this] val framesBuf = new Array[ByteBuf](frameNum)

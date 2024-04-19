@@ -28,8 +28,8 @@ import org.openucx.jucx.ucs.UcsConstants.STATUS
 
 object UcxAmId {
     final val CONNECT = 0
-    final val MESSAGE = 1
-    final val STREAM = 2
+    final val MESSAGE_MIDDLE = 1
+    final val MESSAGE = 2
 }
 
 /**
@@ -46,7 +46,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     logDev(s"UcxEventLoop() parent $parent executor $executor ucpContext $ucpContext")
 
     private val ucxChannels = new ConcurrentHashMap[Long, AbstractUcxChannel]
-    // private val ucpAmDatas = new scala.collection.mutable.ListBuffer[UcpAmData]
+    // private val ucpAmDatas = new java.util.LinkedList[UcpAmData]
 
     private val ucpWorkerParams = new UcpWorkerParams().requestThreadSafety()
 
@@ -86,26 +86,23 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val uniqueId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxRead(amData)
+                        channel.ucxRead(amData, true)
                         STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
 
         ucpWorker.setAmRecvHandler(
-            UcxAmId.STREAM,
+            UcxAmId.MESSAGE_MIDDLE,
             new UcpAmRecvCallback {
                 override def onReceive(
                     headerAddress: Long, headerSize: Long, amData: UcpAmData,
                     ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
                         val uniqueId = header.getLong
-                        val streamId = header.getInt
-                        val frameNum = header.getInt
-                        val frameId = header.getInt
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxReadStream(amData, streamId, frameNum, frameId)
+                        channel.ucxRead(amData, false)
                         STATUS.UCS_OK
                     }
             },
@@ -129,11 +126,12 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     }
 
     // def addAmData(amData: UcpAmData) = {
-    //     ucpAmDatas += amData
+    //     ucpAmDatas.add(amData)
     // }
 
     // def clearAmData(): Unit = {
-    //     ucpAmDatas.foreach(_.close())
+    //     ucpAmDatas.forEach(_.close())
+    //     ucpAmDatas.clear()
     // }
 
     private final var eventFd: Int = -1

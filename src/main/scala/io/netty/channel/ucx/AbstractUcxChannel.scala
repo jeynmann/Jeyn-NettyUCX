@@ -77,27 +77,22 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
 
     def toDirectBuffer(buf: ByteBuf): ByteBuf = {
         if (isDirectOrEmpty(buf)) {
-            buf
-        } else {
-            toDirectBuffer(buf, buf)
+            return buf
         }
-    }
 
-    def toDirectBuffer(holder: Object, buf: ByteBuf): ByteBuf = {
         val allocator = config().getAllocator()
 
         val readableBytes = buf.readableBytes()
         val directBuf = allocator.directBuffer(readableBytes, readableBytes)
 
         directBuf.writeBytes(buf, buf.readerIndex(), readableBytes)
-        ReferenceCountUtil.safeRelease(holder)
+        buf.release()
         return directBuf
     }
 
-    def ucxRead(ucpAmData: UcpAmData): Unit = doReadAmData(ucpAmData)
-
-    def ucxReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int, frameId: Int): Unit =
-        doReadStream(ucpAmData, streamId, frameNum, frameId)
+    def ucxRead(ucpAmData: UcpAmData, isCompleted: Boolean): Unit = {
+        doReadAmData(ucpAmData, isCompleted)
+    }
 
     def ucxHandleConnect(ep: UcpEndpoint, remoteId: Long): Unit = {
         ucxUnsafe.remoteId.set(remoteId)
@@ -357,11 +352,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         throw new UnsupportedOperationException()
     }
 
-    protected def doReadAmData(ucpAmData: UcpAmData): Unit = {
-        throw new UnsupportedOperationException()
-    }
-
-    protected def doReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int, frameId: Int): Unit = {
+    protected def doReadAmData(ucpAmData: UcpAmData, isCompleted: Boolean): Unit = {
         throw new UnsupportedOperationException()
     }
 

@@ -13,6 +13,7 @@ import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ucx.UcxWritableByteChannel
 import io.netty.channel.ucx.UcxDummyWritableByteChannel
 import io.netty.channel.ucx.UcxDefaultFileRegionMsg
+import io.netty.channel.ucx.UcxScatterMessage
 import io.netty.handler.codec.MessageToMessageEncoder
 
 import org.apache.spark.network.buffer.ManagedBuffer
@@ -78,9 +79,18 @@ class NettyUcxMessageEncoder extends MessageToMessageEncoder[Message] {
     }
 
     if (body != null) {
-      val header = ctx.alloc().heapBuffer(headerLength)
+      val ucxMessage = new UcxScatterMessage(
+        ctx.channel().asInstanceOf[io.netty.channel.ucx.UcxSocketChannel])
+      val header = ctx.alloc().directBuffer(headerLength)
       encodeHeader(header)
-      out.add(new UcxMessageWithHeader(in.body(), header, body, bodyLength))
+      ucxMessage.addByteBuf(header)
+      body match {
+        case fr: DefaultFileRegion => ucxMessage.addDefaultFileRegion(fr)
+        case buf: ByteBuf => ucxMessage.addByteBuf(buf)
+        case fr: FileRegion => ucxMessage.addFileRegion(fr)
+      }
+      out.add(ucxMessage)
+      // out.add(new UcxMessageWithHeader(in.body(), header, body, bodyLength))
       // body match {
       //   // TODO : support > 2G
       //   case fr: DefaultFileRegion => {

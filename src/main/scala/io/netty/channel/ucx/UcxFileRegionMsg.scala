@@ -5,105 +5,244 @@ import io.netty.buffer.CompositeByteBuf
 import io.netty.buffer.ByteBufAllocator
 import io.netty.channel.FileRegion
 import io.netty.channel.DefaultFileRegion
+import io.netty.util.ReferenceCounted
 import io.netty.util.AbstractReferenceCounted
 
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.channels.WritableByteChannel
 
-class UcxFileRegionMsg(val fr: FileRegion, val ucxChannel: UcxSocketChannel,
-                       val offset: Long, val length: Long)
-    extends AbstractReferenceCounted {
-
-    protected val allocator = ucxChannel.config().getAllocator()
-
-    val frameSize = ucxChannel.config().getFileFrameSize()
-    val frameNums = (length.toInt - 1) / frameSize + 1
-    protected var position = 0L
-    protected var frameNow = 0
-
-    def this(fr: FileRegion, ucxChannel: UcxSocketChannel) = {
-        this(fr, ucxChannel, fr.transferred(), fr.count() - fr.transferred())
-    }
-
-    def isEmpty() = position == length
-
-    def frameId() = frameNow
-
-    def forEachFrame(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Int = {
-        val frameLimit = (frameNow + spinLimit).min(frameNums)
-        while (frameNow != frameLimit) {
-            val currentSize = frameSize.min((length - position).toInt)
-            val byteChannel = new UcxWritableByteChannel(allocator, currentSize)
-
-            fr.transferTo(byteChannel, position + offset)
-
-            processor(frameNow, byteChannel.internalByteBuf())
-            position += currentSize
-            frameNow += 1
+// @Note The convertion will release refCounter if is a refCounter type
+object UcxConverter {
+    def toDirectByteBuf(buf: ByteBuf, alloc: ByteBufAllocator): ByteBuf = {
+        if (buf.isDirect() || buf.hasMemoryAddress() ||
+            (buf.readableBytes() == 0)) {
+            return buf
         }
-        return frameLimit - frameNow
+
+        val readableBytes = buf.readableBytes()
+        val directBuf = alloc.directBuffer(readableBytes, readableBytes)
+
+        directBuf.writeBytes(buf, buf.readerIndex(), readableBytes)
+        buf.release()
+        return directBuf
     }
 
-    def forall(processor: ByteBuf => Unit): Unit = {
-        val byteChannel = new UcxWritableByteChannel(allocator, length.toInt)
+    def toDirectByteBuf(fr: FileRegion, offset: Long, length: Long,
+                        alloc: ByteBufAllocator): ByteBuf = {
+        val byteChannel = new UcxWritableByteChannel(alloc, length.toInt)
 
         fr.transferTo(byteChannel, offset)
-
-        processor(byteChannel.internalByteBuf())
-    }
-
-    override
-    def touch(): this.type = {
-        return this
-    }
-
-    override
-    def touch(hint: Object): this.type = {
-        return this
-    }
-
-    override
-    def deallocate(): Unit = {
         fr.release()
+        byteChannel.internalByteBuf()
+    }
+
+    def toDirectByteBuf(fr: DefaultFileRegion, fc: FileChannel, offset: Long,
+                        length: Long, alloc: ByteBufAllocator): ByteBuf = {
+        val directBuf = alloc.directBuffer(length.toInt, length.toInt)
+
+        directBuf.writeBytes(fc, offset, length.toInt)
+        fr.release()
+        directBuf
     }
 }
 
-class UcxDefaultFileRegionMsg(override val fr: DefaultFileRegion,
-                              override val ucxChannel: UcxSocketChannel,
-                              override val offset: Long,
-                              override val length: Long)
-    extends UcxFileRegionMsg(fr, ucxChannel, offset, length) {
+abstract class UcxMsgFrame(msg: ReferenceCounted) extends ReferenceCounted{
+    // @Note The convertion will release refCounter if converted to another object
+    def convertToByteBuf(): ByteBuf
 
-    protected val fileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
-
-    def this(fr: DefaultFileRegion, ucxChannel: UcxSocketChannel) = {
-        this(fr, ucxChannel, fr.position() + fr.transferred(),
-             fr.count() - fr.transferred())
+    override
+    def retain(): this.type = {
+        msg.retain()
+        this
     }
 
-    override def forEachFrame(processor: (Int, ByteBuf) => Unit, spinLimit: Int): Int = {
-        val frameLimit = (frameNow + spinLimit).min(frameNums)
-        while (frameNow != frameLimit) {
-            val currentSize = frameSize.min((length - position).toInt)
-            val directBuf = allocator.directBuffer(currentSize, currentSize)
+    override
+    def retain(increment: Int): this.type = {
+        msg.retain(increment)
+        this
+    }
 
-            UcxDefaultFileRegionMsg.readDefaultFileRegion(
-                fileChannel, position + offset, currentSize, directBuf)
+    override
+    def release(): Boolean = {
+        msg.release()
+    }
 
-            processor(frameNow, directBuf)
-            position += currentSize
-            frameNow += 1
+    override
+    def release(decrement: Int): Boolean = {
+        msg.release(decrement)
+    }
+
+    override
+    def refCnt(): Int = {
+        msg.refCnt()
+    }
+
+    override
+    def touch() = this
+
+    override
+    def touch(hint: Object) = this
+}
+
+class UcxByteBufFrame(buf: ByteBuf, alloc: ByteBufAllocator)
+    extends UcxMsgFrame(buf) {
+    // convert immediately
+    protected val directBuf: ByteBuf = UcxConverter.toDirectByteBuf(buf, alloc)
+
+    override
+    def convertToByteBuf(): ByteBuf = directBuf
+}
+
+class UcxFileRegionFrame(fr: FileRegion, offset: Long, length: Long,
+                         alloc: ByteBufAllocator) extends UcxMsgFrame(fr) {
+    // file could be very large, use lazy load here
+    override
+    def convertToByteBuf(): ByteBuf = {
+        UcxConverter.toDirectByteBuf(fr, offset, length, alloc)
+    }
+}
+
+class UcxDefaultFileRegionFrame(fr: DefaultFileRegion, offset: Long, length: Long,
+                                alloc: ByteBufAllocator) extends UcxMsgFrame(fr) {
+    protected val fc: FileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
+    // file could be very large, use lazy load here
+    override
+    def convertToByteBuf(): ByteBuf = {
+        UcxConverter.toDirectByteBuf(fr, fc, offset, length, alloc)
+    }
+}
+
+trait UcxScatterMsg extends AbstractReferenceCounted with UcxLogging {
+
+    protected val frames = new java.util.ArrayList[UcxMsgFrame]()
+    protected var readerIndex = 0
+    protected var writerIndex = 0
+
+    protected var alloc: ByteBufAllocator = _
+    protected var frameSize: Int = _
+    protected var spinCount: Int = _
+
+    protected def init(ucxChannel: UcxSocketChannel) = {
+        val config = ucxChannel.config()
+        alloc = config.getAllocator()
+        frameSize = config.getFileFrameSize()
+        spinCount = config.getWriteSpinCount()
+    }
+
+    def ensureCapacity(minCapacity: Int) = frames.ensureCapacity(minCapacity)
+
+    def capacity: Int = frames.size()
+
+    def position(): Int = readerIndex
+
+    def limit(): Int = writerIndex
+
+    def isEmpty(): Boolean = readerIndex == writerIndex
+
+    def remaining(): Int = writerIndex - readerIndex
+
+    def forEachMsg(processor: UcxScatterMsg.Processor): Int = {
+        val readLimit = (readerIndex + spinCount).min(writerIndex)
+        val readCount = readLimit - readerIndex
+
+        while (readerIndex != readLimit) {
+            val buf = frames.get(readerIndex).convertToByteBuf()
+
+            readerIndex += 1
+            processor.accept(buf, readerIndex == writerIndex)
         }
-        return frameLimit - frameNow
+        return readCount
     }
 
-    override def forall(processor: ByteBuf => Unit): Unit = {
-        val directBuf = allocator.directBuffer(length.toInt, length.toInt)
+    def addMessage(msg: ReferenceCounted): Unit
 
-        UcxDefaultFileRegionMsg.readDefaultFileRegion(fileChannel, offset, length,
-                                                      directBuf)
-        processor(directBuf)
+    override
+    def touch() = this
+
+    override
+    def touch(hint: Object) = this
+
+    override
+    def deallocate(): Unit = {
+        if (!isEmpty()) {
+            val iter = frames.listIterator(readerIndex)
+            while (iter.hasNext()) {
+                iter.next().release()
+            }
+        }
+        frames.clear()
+    }
+}
+
+object UcxScatterMsg {
+    type Processor = java.util.function.BiConsumer[ByteBuf, Boolean]
+}
+
+trait UcxFileRegionMsg extends UcxScatterMsg {
+
+    def addFileRegion(fr: FileRegion): Unit = {
+        val offset = fr.transferred()
+        val length = fr.count() - fr.transferred()
+        if (length == 0) {
+            return
+        }
+
+        if (length <= frameSize) {
+            val frame = new UcxFileRegionFrame(fr, offset, length, alloc)
+            frames.add(frame)
+            writerIndex += 1
+            return
+        }
+
+        val count = ((length - 1) / frameSize).toInt + 1
+        ensureCapacity(writerIndex + count)
+
+        val limit = offset + length
+        var offsetNow = offset
+        while (offsetNow != limit) {
+            val lengthNow = (limit - offsetNow).toInt.min(frameSize)
+            val frame = new UcxFileRegionFrame(fr, offsetNow, lengthNow, alloc)
+            frames.add(frame)
+            offsetNow += lengthNow
+        }
+
+        fr.retain(count - 1)
+        writerIndex += count
+    }
+}
+
+trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
+
+    def addDefaultFileRegion(fr: DefaultFileRegion): Unit = {
+        val offset = fr.position() + fr.transferred()
+        val length = fr.count() - fr.transferred()
+        if (length == 0) {
+            return
+        }
+
+        if (length <= frameSize) {
+            val frame = new UcxDefaultFileRegionFrame(fr, offset, length, alloc)
+            frames.add(frame)
+            writerIndex += 1
+            return
+        }
+
+        val count = ((length - 1) / frameSize).toInt + 1
+        ensureCapacity(writerIndex + count)
+
+        val limit = offset + length
+        var offsetNow = offset
+        while (offsetNow != limit) {
+            val lengthNow = (limit - offsetNow).toInt.min(frameSize)
+            val frame = new UcxDefaultFileRegionFrame(fr, offsetNow, lengthNow, alloc)
+            frames.add(frame)
+            offsetNow += lengthNow
+        }
+        logDev(s"write $frames-$count $offset-$offsetNow-$length")
+
+        fr.retain(count - 1)
+        writerIndex += count
     }
 }
 
@@ -128,6 +267,57 @@ object UcxDefaultFileRegionMsg {
     def readDefaultFileRegion(fileChannel: FileChannel, offset: Long,
                               length: Long, directBuf: ByteBuf): Unit = {
         directBuf.writeBytes(fileChannel, offset, length.toInt)
+    }
+}
+
+class UcxFileRegionMessage(fr: FileRegion, ucxChannel: UcxSocketChannel)
+    extends UcxFileRegionMsg {
+
+    init(ucxChannel)
+    addFileRegion(fr)
+
+    override
+    def addMessage(msg: ReferenceCounted): Unit = {
+        msg match {
+            case fr: FileRegion => addFileRegion(fr)
+            case obj => throw new IllegalArgumentException(s"unsupported: $obj")
+        }
+    }
+}
+
+class UcxDefaultFileRegionMessage(fr: DefaultFileRegion, ucxChannel: UcxSocketChannel)
+    extends UcxDefaultFileRegionMsg {
+
+    init(ucxChannel)
+    addDefaultFileRegion(fr)
+
+    override
+    def addMessage(msg: ReferenceCounted): Unit = {
+        msg match {
+            case fr: DefaultFileRegion => addDefaultFileRegion(fr)
+            case obj => throw new IllegalArgumentException(s"unsupported: $obj")
+        }
+    }
+}
+
+class UcxScatterMessage(ucxChannel: UcxSocketChannel)
+    extends UcxFileRegionMsg with UcxDefaultFileRegionMsg {
+
+    init(ucxChannel)
+
+    def addByteBuf(buf: ByteBuf): Unit = {
+        frames.add(new UcxByteBufFrame(buf, alloc))
+        writerIndex += 1
+    }
+
+    override
+    def addMessage(msg: ReferenceCounted): Unit = {
+        msg match {
+            case fr: DefaultFileRegion => addDefaultFileRegion(fr)
+            case fr: FileRegion => addFileRegion(fr)
+            case fr: ByteBuf => addByteBuf(fr)
+            case obj => throw new IllegalArgumentException(s"unsupported: $obj")
+        }
     }
 }
 

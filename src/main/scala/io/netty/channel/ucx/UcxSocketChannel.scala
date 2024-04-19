@@ -29,17 +29,59 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     extends AbstractUcxChannel(parent) with SocketChannel with UcxLogging {
     logDev(s"UcxSocketChannel()")
 
+    protected val readBufs = new java.util.LinkedList[ByteBuf]
     protected val ucxSocketConfig = new UcxSocketChannelConfig(this)
     protected var underlyingUnsafe: UcxClientUnsafe = _
 
-    protected val streamStates = new scala.collection.mutable.HashMap[Int, StreamState]
     @volatile protected var bOutputShutdown = false
     @volatile protected var bInputShutdown = false
 
-    protected val flushTask = new Runnable() {
+    protected val flushWriteTask = new Runnable() {
         override
         def run(): Unit = {
             underlyingUnsafe.flush0()
+        }
+    }
+
+    protected val messageProcessor = new UcxScatterMsg.Processor {
+        override def accept(buf: ByteBuf, isCompleted: Boolean) = {
+            doWriteByteBuf(buf, isCompleted)
+        }
+    }
+
+    protected def flushReadBufs(): Unit = {
+        var buf: ByteBuf = null
+        val frameNums = readBufs.size()
+        if (frameNums == 1) {
+            buf = readBufs.getFirst()
+        } else {
+            buf = new CompositeByteBuf(config().getAllocator(), true, frameNums, readBufs)
+        }
+        pipeline().fireChannelRead(buf).fireChannelReadComplete()
+        logDev(s"Read MESSAGE from $remote success: $buf")
+        readBufs.clear()
+    }
+
+    protected def flushReadBufs(status: Int, errorMsg: String): Unit = {
+        readBufs.forEach(_.release())
+        readBufs.clear()
+        val e = new UcxException(s"Read MESSAGE from $remote fail: $errorMsg", status)
+        pipeline().fireChannelReadComplete().fireExceptionCaught(e)
+    }
+
+    protected val emptyReadCallback = new UcxCallback() {
+        override def onSuccess(r: UcpRequest): Unit = {}
+        override def onError(status: Int, errorMsg: String): Unit = {
+            flushReadBufs(status, errorMsg)
+        }
+    }
+
+    protected val defaultReadCallback = new UcxCallback() {
+        override def onSuccess(r: UcpRequest): Unit = {
+            flushReadBufs()
+        }
+        override def onError(status: Int, errorMsg: String): Unit = {
+            flushReadBufs(status, errorMsg)
         }
     }
 
@@ -73,14 +115,14 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     override
     protected def doWrite(in: ChannelOutboundBuffer): Unit = {
         // write unfinished
-        var spinLimit = config().getWriteSpinCount()
-        while (!in.isEmpty() && spinLimit > 0) {
+        var spinCount = config().getWriteSpinCount()
+        while (!in.isEmpty() && spinCount > 0) {
             val msg = in.current()
             msg match {
             case buf: ByteBuf =>
-                spinLimit -= writeByteBuf(in, buf)
-            case fm: UcxFileRegionMsg =>
-                spinLimit -= writeFileMessage(in, fm, spinLimit)
+                spinCount -= writeByteBuf(in, buf)
+            case scm: UcxScatterMsg =>
+                spinCount -= writeScatterMessage(in, scm)
             case _ =>
                 // Should never reach here.
                 throw new UnsupportedOperationException(
@@ -89,68 +131,21 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
 
         if (!in.isEmpty()) {
-            eventLoop().execute(flushTask)
+            eventLoop().execute(flushWriteTask)
         }
     }
 
-    class UcxDebugCallback(doComplete: () => Unit)
-        extends UcxCallback with UcxLogging {
-        override def onSuccess(request: UcpRequest): Unit = {
-            doComplete()
-            logDev(s"$local MESSAGE $remote: success")
+    protected def writeScatterMessage(in: ChannelOutboundBuffer,
+                                      msg: UcxScatterMsg): Int = {
+        if (msg.isEmpty) {
+            in.remove()
+            return 0
         }
 
-        override def onError(status: Int, errorMsg: String): Unit = {
-            doComplete()
-            throw new UcxException(s"$local MESSAGE $remote: $errorMsg", status)
-        }
+        return msg.forEachMsg(messageProcessor)
     }
 
-    protected def writeFileMessage(in: ChannelOutboundBuffer, fm: UcxFileRegionMsg,
-                                   spinLimit: Int): Int = {
-        var headerBuf: ByteBuf = null
-        try {
-            val frameNums = fm.frameNums
-            if (frameNums == 1) {
-                fm.forall(doWriteByteBuf _)
-                in.remove()
-                return 1
-            }
-
-            val headerSize = UnsafeUtils.LONG_SIZE + UnsafeUtils.INT_SIZE +
-                             UnsafeUtils.INT_SIZE + UnsafeUtils.INT_SIZE
-
-            headerBuf = config().getAllocator().directBuffer(headerSize, headerSize)
-
-            val streamId = StreamState.nextId
-            val nioBuf = headerBuf.internalNioBuffer(headerBuf.readerIndex(),
-                                                     headerSize).slice()
-
-            nioBuf.putLong(underlyingUnsafe.remoteId.get)
-            nioBuf.putInt(streamId)
-            nioBuf.putInt(frameNums)
-
-            val frameIdPos = headerSize - UnsafeUtils.INT_SIZE
-            def processor(frameId: Int, buf: ByteBuf): Unit = {
-                val writeCb = newFrameUcxCallback(buf)
-                val body = buf.internalNioBuffer(buf.readerIndex(), buf.readableBytes())
-                nioBuf.position(frameIdPos)
-                nioBuf.putInt(frameId).rewind()
-                underlyingUnsafe.doWriteFrame0(nioBuf, body, writeCb)
-            }
-            val spinNum = fm.forEachFrame(processor, spinLimit)
-
-            if (fm.isEmpty) {
-                in.remove()
-            }
-            return spinNum
-        } finally {
-            if (headerBuf != null) {
-                headerBuf.release()
-            }
-        }
-    }
-
+    // TODO: Add sn to avoid reorder
     protected def writeByteBuf(in: ChannelOutboundBuffer, buf: ByteBuf): Int = {
         if (buf.readableBytes() == 0) {
             in.remove()
@@ -159,12 +154,12 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         // Increment refCounts here to let UcxCallback release
         buf.retain()
 
-        val spinNum = doWriteByteBuf(buf)
+        val spinNum = doWriteByteBuf(buf, true)
         in.remove()
         return spinNum
     }
 
-    protected def doWriteByteBuf(buf: ByteBuf): Int = {
+    protected def doWriteByteBuf(buf: ByteBuf, isCompleted: Boolean): Int = {
         val nioBufferCount = buf.nioBufferCount()
         val writeCb = newWriteUcxCallback(buf, nioBufferCount)
 
@@ -172,17 +167,26 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         val writeOnce = hasAddress || (nioBufferCount == 1)
         val readerIndex = buf.readerIndex()
         val readableBytes = buf.readableBytes()
+        val amId = if (isCompleted) UcxAmId.MESSAGE else UcxAmId.MESSAGE_MIDDLE
         if (writeOnce) {
             if (hasAddress) {
                 val address = buf.memoryAddress() + readerIndex
-                underlyingUnsafe.doWrite0(address, readableBytes, writeCb)
+                underlyingUnsafe.doWrite0(amId, address, readableBytes, writeCb)
             } else {
                 val nioBuf = buf.internalNioBuffer(readerIndex, readableBytes)
-                underlyingUnsafe.doWrite0(nioBuf, writeCb)
+                underlyingUnsafe.doWrite0(amId, nioBuf, writeCb)
             }
         } else {
-            buf.nioBuffers(readerIndex, readableBytes).foreach(
-                underlyingUnsafe.doWrite0(_, writeCb))
+            val nioBuffers = buf.nioBuffers(readerIndex, readableBytes)
+            val tailId = nioBufferCount - 1
+            var i = 0
+            do {
+                val midBuf = nioBuffers(i)
+                underlyingUnsafe.doWrite0(UcxAmId.MESSAGE_MIDDLE, midBuf, writeCb)
+                i += 1
+            } while (i != tailId)
+            val tailBuf = nioBuffers(tailId)
+            underlyingUnsafe.doWrite0(amId, tailBuf, writeCb)
         }
 
         return nioBufferCount
@@ -195,19 +199,12 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 toDirectBuffer(buf)
             }
             case fr: DefaultFileRegion => {
-                if (fr.count() == fr.transferred()) {
-                    io.netty.buffer.Unpooled.EMPTY_BUFFER
-                } else {
-                    new UcxDefaultFileRegionMsg(fr, this)
-                }
+                new UcxDefaultFileRegionMessage(fr, this)
             }
             case fr: FileRegion => {
-                if (fr.count() == fr.transferred()) {
-                    io.netty.buffer.Unpooled.EMPTY_BUFFER
-                } else {
-                    new UcxFileRegionMsg(fr, this)
-                }
+                new UcxFileRegionMessage(fr, this)
             }
+            case m: UcxScatterMsg => m
             case _ => 
                 throw new UnsupportedOperationException(
                     s"unsupported message type: ${msg.getClass}")
@@ -218,77 +215,30 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         new UcxSharedCallback(buf, refCounts, local, remote)
     }
 
-    protected def newFrameUcxCallback(buf: ByteBuf): UcxCallback = {
-        new UcxFrameCallback(buf, local, remote)
-    }
-
     override
-    def doReadAmData(ucpAmData: UcpAmData): Unit = {
+    def doReadAmData(ucpAmData: UcpAmData, isCompleted: Boolean): Unit = {
         val readableBytes = ucpAmData.getLength.toInt
         val pipe = pipeline()
 
-        var buf: ByteBuf = null
+        val alloc = config().getAllocator()
+        val readCb = if (isCompleted) defaultReadCallback else emptyReadCallback
         try {
-            val alloc = config().getAllocator()
-            val readCb = new UcxCallback() {
-                override def onSuccess(r: UcpRequest): Unit = {
-                    buf.writerIndex(readableBytes)
-                    pipe.fireChannelRead(buf).fireChannelReadComplete()
-                    logDev(s"Read MESSAGE from $remote success: $buf")
-                }
-                override def onError(status: Int, errorMsg: String): Unit = {
-                    val e = new UcxException(s"Read MESSAGE from $remote fail: $errorMsg", status)
-                    pipe.fireChannelReadComplete().fireExceptionCaught(e)
-                }
-            }
-
             if (ucpAmData.isDataValid()) {
                 val ucpBuf = UnsafeUtils.getByteBufferView(
                     ucpAmData.getDataAddress, readableBytes)
-                buf = alloc.heapBuffer(readableBytes, readableBytes)
+                val buf = alloc.heapBuffer(readableBytes, readableBytes)
                 buf.writeBytes(ucpBuf)
+                readBufs.add(buf)
                 readCb.onSuccess(null)
             } else {
-                buf = alloc.directBuffer(readableBytes, readableBytes)
+                val buf = alloc.directBuffer(readableBytes, readableBytes)
+                buf.writerIndex(buf.writerIndex() + readableBytes)
+                readBufs.add(buf)
                 underlyingUnsafe.doRead0(ucpAmData, buf, readCb) 
             }
         } catch {
             case t: Throwable => {
-                if (buf != null) {
-                    buf.release()
-                }
-                throw t
-            }
-        }
-    }
-
-    override
-    def doReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int, frameId: Int): Unit = {
-        val readableBytes = ucpAmData.getLength.toInt
-        var streamState: StreamState = null
-
-        try {
-            streamState = streamStates.getOrElseUpdate(streamId, {
-                new StreamState(this, streamId, frameNum,
-                                _ => streamStates.remove(streamId))
-            })
-
-            val directBuf = streamState.frameBuf(frameId, readableBytes)
-
-            if (ucpAmData.isDataValid()) {
-                val ucpBuf = UnsafeUtils.getByteBufferView(
-                    ucpAmData.getDataAddress, readableBytes)
-                directBuf.writeBytes(ucpBuf)
-                streamState.onSuccess(null)
-            } else {
-                directBuf.writerIndex(directBuf.writerIndex() + readableBytes)
-                underlyingUnsafe.doRead0(ucpAmData, directBuf, streamState) 
-            }
-        } catch {
-            case t: Throwable => {
-                if (streamState != null) {
-                    streamState.onError(-1, t.toString())
-                }
+                readCb.onError(-1, t.toString())
                 throw t
             }
         }
@@ -418,37 +368,21 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         var ucpEpAddress: ByteBuffer = _
         var ucpEp: UcpEndpoint = _
 
-        private[ucx] def doWrite0(buf: ByteBuffer, writeCb: UcxCallback): Int = {
+        private[ucx] def doWrite0(amId: Int, buf: ByteBuffer,
+                                  writeCb: UcxCallback): Int = {
             val address = UnsafeUtils.getAddress(buf) + buf.position()
             val length = buf.remaining()
-            doWrite0(address, length, writeCb)
+            doWrite0(amId, address, length, writeCb)
         }
 
-        private[ucx] def doWrite0(address: Long, length: Int, writeCb: UcxCallback): Int = {
+        private[ucx] def doWrite0(amId: Int, address: Long, length: Int,
+                                  writeCb: UcxCallback): Int = {
             val header = remoteId.directBuffer()
 
-            logDev(s"$local MESSAGE $remote: ongoing($address $length)")
+            logDev(s"$local MESSAGE $remote: ongoing($amId $address $length)")
             ucpEp.sendAmNonBlocking(
-                UcxAmId.MESSAGE,
-                UnsafeUtils.getAddress(header), header.remaining(),
+                amId, UnsafeUtils.getAddress(header), header.remaining(),
                 address, length, 0, writeCb, MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
-            return 1
-        }
-
-        private[ucx] def doWriteFrame0(header: ByteBuffer, buf: ByteBuffer, 
-                                       writeCb: UcxCallback): Int = {
-            val headerAddress = UnsafeUtils.getAddress(header) + header.position()
-            val headerLength = header.remaining()
-            val address = UnsafeUtils.getAddress(buf) + buf.position()
-            val length = buf.remaining()
-
-            // TODO UCP_AM_SEND_FLAG_COPY_HEADER
-            logDev(s"$local STREAM $remote: ongoing($address $length)")
-
-            ucpEp.sendAmNonBlocking(
-                UcxAmId.STREAM,
-                headerAddress, headerLength, address, length, 8, writeCb,
-                MEMORY_TYPE.UCS_MEMORY_TYPE_HOST)
             return 1
         }
 
@@ -554,6 +488,10 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 while (!closing.isCompleted) {
                     ucpWorker.progress()
                 }
+                if (!readBufs.isEmpty()) {
+                    readBufs.forEach(_.release())
+                    readBufs.clear()
+                }
                 ucpEp = null
             }
 
@@ -621,19 +559,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     }
 }
 
-class UcxFrameCallback(buf: ByteBuf, local: SocketAddress,
-                       remote: SocketAddress)
-    extends UcxCallback with UcxLogging {
-    override def onSuccess(request: UcpRequest): Unit = {
-        buf.release()
-    }
-
-    override def onError(status: Int, errorMsg: String): Unit = {
-        buf.release()
-        throw new UcxException(s"$local STREAM $remote: $errorMsg", status)
-    }
-}
-
 class UcxSharedCallback(buf: ByteBuf, private var refCounts: Int,
                         local: SocketAddress, remote: SocketAddress)
     extends UcxCallback with UcxLogging {
@@ -654,46 +579,4 @@ class UcxSharedCallback(buf: ByteBuf, private var refCounts: Int,
             buf.release()
         }
     }
-}
-
-class StreamState(ucxChannel: UcxSocketChannel, streamId: Int, frameNum: Int,
-                  onComplete: ByteBuf => Unit)
-    extends UcxCallback with UcxLogging {
-
-    private[this] val alloc = ucxChannel.config().getAllocator()
-    private[this] val remote = ucxChannel.remoteAddress()
-
-    private[this] val framesBuf = new Array[ByteBuf](frameNum)
-    private[this] var received = 0
-
-    def frameBuf(frameId: Int, realSize: Int): ByteBuf = {
-        val frameNow = alloc.directBuffer(realSize, realSize)
-        framesBuf(frameId) = frameNow
-        frameNow
-    }
-
-    override def onSuccess(r: UcpRequest): Unit = {
-        received += 1
-        if (received == frameNum) {
-            val buf = new CompositeByteBuf(alloc, true, frameNum)
-            framesBuf.foreach(buf.addComponent(true, _))
-            logDev(s"Read STREAM from $remote success: ($streamId-$received ${buf.readableBytes})")
-            ucxChannel.pipeline().fireChannelRead(buf).fireChannelReadComplete()
-            onComplete(buf)
-        }
-    }
-
-    override def onError(status: Int, errorMsg: String): Unit = {
-        val e = new UcxException(s"Read STREAM from $remote fail: ($streamId-$received $errorMsg)", status)
-        onComplete(null)
-        framesBuf.foreach(_.release())
-        ucxChannel.pipeline().fireChannelReadComplete().fireExceptionCaught(e)
-    }
-}
-
-object StreamState {
-    val seed = new java.util.Random
-    val streamId = new java.util.concurrent.atomic.AtomicInteger(seed.nextInt)
-
-    def nextId = streamId.incrementAndGet()
 }

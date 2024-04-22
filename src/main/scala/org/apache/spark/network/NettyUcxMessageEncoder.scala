@@ -90,30 +90,6 @@ class NettyUcxMessageEncoder extends MessageToMessageEncoder[Message] {
         case fr: FileRegion => ucxMessage.addFileRegion(fr)
       }
       out.add(ucxMessage)
-      // out.add(new UcxMessageWithHeader(in.body(), header, body, bodyLength))
-      // body match {
-      //   // TODO : support > 2G
-      //   case fr: DefaultFileRegion => {
-      //     val fileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
-      //     val fileOffset = fr.position() + fr.transferred()
-      //     val msg = ctx.alloc().directBuffer(headerLength + bodyLength.toInt)
-      //     encodeHeader(msg)
-      //     msg.writeBytes(fileChannel, fileOffset, bodyLength.toInt)
-      //     out.add(msg)
-      //   }
-      //   case buf: ByteBuf => {
-      //     val msg = ctx.alloc().directBuffer(headerLength + bodyLength.toInt)
-      //     encodeHeader(msg)
-      //     msg.writeBytes(buf)
-      //     out.add(msg)
-      //   }
-      //   case fr: FileRegion => {
-      //     val header = ctx.alloc().directBuffer(headerLength)
-      //     encodeHeader(header)
-      //     out.add(new UcxMessageWithHeader(in.body(), header, body, bodyLength))
-      //   }
-      //   case _ => throw new IllegalArgumentException(s"unsupported type: $body")
-      // }
     } else {
       val header = ctx.alloc().directBuffer(headerLength)
       encodeHeader(header)

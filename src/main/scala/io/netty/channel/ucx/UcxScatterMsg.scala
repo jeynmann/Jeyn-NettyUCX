@@ -103,9 +103,9 @@ class UcxFileRegionFrame(fr: FileRegion, offset: Long, length: Long,
     }
 }
 
-class UcxDefaultFileRegionFrame(fr: DefaultFileRegion, offset: Long, length: Long,
-                                alloc: ByteBufAllocator) extends UcxMsgFrame(fr) {
-    protected val fc: FileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
+class UcxDefaultFileRegionFrame(
+    fr: DefaultFileRegion, fc: FileChannel, offset: Long, length: Long,
+    alloc: ByteBufAllocator) extends UcxMsgFrame(fr) {
     // file could be very large, use lazy load here
     override
     def convertToByteBuf(): ByteBuf = {
@@ -122,12 +122,14 @@ trait UcxScatterMsg extends AbstractReferenceCounted with UcxLogging {
     protected var alloc: ByteBufAllocator = _
     protected var frameSize: Int = _
     protected var spinCount: Int = _
+    protected var streamId: Int = _
 
     protected def init(ucxChannel: UcxSocketChannel) = {
         val config = ucxChannel.config()
         alloc = config.getAllocator()
         frameSize = config.getFileFrameSize()
         spinCount = config.getWriteSpinCount()
+        streamId = UcxScatterMsg.nextId
     }
 
     def ensureCapacity(minCapacity: Int) = frames.ensureCapacity(minCapacity)
@@ -149,8 +151,8 @@ trait UcxScatterMsg extends AbstractReferenceCounted with UcxLogging {
         while (readerIndex != readLimit) {
             val buf = frames.get(readerIndex).convertToByteBuf()
 
+            processor.accept(buf, (streamId, writerIndex, readerIndex))
             readerIndex += 1
-            processor.accept(buf, readerIndex == writerIndex)
         }
         return readCount
     }
@@ -176,7 +178,13 @@ trait UcxScatterMsg extends AbstractReferenceCounted with UcxLogging {
 }
 
 object UcxScatterMsg {
-    type Processor = java.util.function.BiConsumer[ByteBuf, Boolean]
+    type MessageId = (Int, Int, Int)
+    type Processor = java.util.function.BiConsumer[ByteBuf, MessageId]
+
+    private val seed = new java.util.Random
+    private val streamId = new java.util.concurrent.atomic.AtomicInteger(seed.nextInt)
+
+    def nextId = streamId.incrementAndGet()
 }
 
 trait UcxFileRegionMsg extends UcxScatterMsg {
@@ -221,8 +229,9 @@ trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
             return
         }
 
+        val fc: FileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
         if (length <= frameSize) {
-            val frame = new UcxDefaultFileRegionFrame(fr, offset, length, alloc)
+            val frame = new UcxDefaultFileRegionFrame(fr, fc, offset, length, alloc)
             frames.add(frame)
             writerIndex += 1
             return
@@ -235,7 +244,7 @@ trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
         var offsetNow = offset
         while (offsetNow != limit) {
             val lengthNow = (limit - offsetNow).toInt.min(frameSize)
-            val frame = new UcxDefaultFileRegionFrame(fr, offsetNow, lengthNow, alloc)
+            val frame = new UcxDefaultFileRegionFrame(fr, fc, offsetNow, lengthNow, alloc)
             frames.add(frame)
             offsetNow += lengthNow
         }
@@ -270,6 +279,43 @@ object UcxDefaultFileRegionMsg {
     }
 }
 
+trait UcxCompositeByteBufMsg extends UcxScatterMsg {
+
+    def addCompositeByteBuf(buf: CompositeByteBuf): Unit = {
+        val offset = buf.readerIndex()
+        val length = buf.readableBytes()
+        if (length == 0) {
+            return
+        }
+
+        val bufs = buf.decompose(offset, length)
+        val count = bufs.size()
+
+        bufs.forEach(b => {
+            val frame = new UcxByteBufFrame(buf, alloc)
+            frames.add(frame)
+        })
+        buf.clear().release()
+
+        writerIndex += count
+    }
+}
+
+class UcxCompositeByteBufMessage(buf: CompositeByteBuf, ucxChannel: UcxSocketChannel)
+    extends UcxCompositeByteBufMsg {
+
+    init(ucxChannel)
+    addCompositeByteBuf(buf)
+
+    override
+    def addMessage(msg: ReferenceCounted): Unit = {
+        msg match {
+            case buf: CompositeByteBuf => addCompositeByteBuf(buf)
+            case obj => throw new IllegalArgumentException(s"unsupported: $obj")
+        }
+    }
+}
+
 class UcxFileRegionMessage(fr: FileRegion, ucxChannel: UcxSocketChannel)
     extends UcxFileRegionMsg {
 
@@ -300,8 +346,8 @@ class UcxDefaultFileRegionMessage(fr: DefaultFileRegion, ucxChannel: UcxSocketCh
     }
 }
 
-class UcxScatterMessage(ucxChannel: UcxSocketChannel)
-    extends UcxFileRegionMsg with UcxDefaultFileRegionMsg {
+class UcxScatterMessage(ucxChannel: UcxSocketChannel) extends UcxFileRegionMsg
+    with UcxDefaultFileRegionMsg with UcxCompositeByteBufMsg {
 
     init(ucxChannel)
 
@@ -315,6 +361,7 @@ class UcxScatterMessage(ucxChannel: UcxSocketChannel)
         msg match {
             case fr: DefaultFileRegion => addDefaultFileRegion(fr)
             case fr: FileRegion => addFileRegion(fr)
+            case fr: CompositeByteBuf => addCompositeByteBuf(fr)
             case fr: ByteBuf => addByteBuf(fr)
             case obj => throw new IllegalArgumentException(s"unsupported: $obj")
         }

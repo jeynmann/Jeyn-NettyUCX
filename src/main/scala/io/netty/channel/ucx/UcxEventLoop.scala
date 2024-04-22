@@ -28,7 +28,7 @@ import org.openucx.jucx.ucs.UcsConstants.STATUS
 
 object UcxAmId {
     final val CONNECT = 0
-    final val MESSAGE_MIDDLE = 1
+    final val STREAM = 1
     final val MESSAGE = 2
 }
 
@@ -54,7 +54,15 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     private[ucx] var ucpWorkerId: Long = _
     private[ucx] var ucpWorkerFd: Int = _
 
+    private[ucx] val streamHeaderSize = UnsafeUtils.LONG_SIZE + UnsafeUtils.INT_SIZE +
+                                        UnsafeUtils.INT_SIZE + UnsafeUtils.INT_SIZE
+    private[ucx] val streamHeader = ByteBuffer.allocateDirect(streamHeaderSize)
+
     def ucxEventLoopGroup = parent.asInstanceOf[UcxEventLoopGroup]
+
+    def ucxStreamHeader = streamHeader.duplicate()
+
+    def ucxStreamFlag = 8
 
     private[ucx] def createUcpWorker(ucpWorkerParams: UcpWorkerParams): UcpWorker = {
         val ucpWorker = ucpContext.newWorker(ucpWorkerParams)
@@ -86,23 +94,26 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val uniqueId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxRead(amData, true)
+                        channel.ucxRead(amData)
                         STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
 
         ucpWorker.setAmRecvHandler(
-            UcxAmId.MESSAGE_MIDDLE,
+            UcxAmId.STREAM,
             new UcpAmRecvCallback {
                 override def onReceive(
                     headerAddress: Long, headerSize: Long, amData: UcpAmData,
                     ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
                         val uniqueId = header.getLong
+                        val streamId = header.getInt
+                        val frameNum = header.getInt
+                        val frameId = header.getInt
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxRead(amData, false)
+                        channel.ucxReadStream(amData, streamId, frameNum, frameId)
                         STATUS.UCS_OK
                     }
             },

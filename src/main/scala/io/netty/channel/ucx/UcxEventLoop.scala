@@ -78,7 +78,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val remoteId = header.getLong
                         val channel = ucxChannels.get(nativeId)
 
-                        channel.ucxHandleConnect(ep, remoteId)
+                        channel.doHandleConnect(ep, remoteId)
                         STATUS.UCS_OK
                     }
             },
@@ -94,7 +94,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val uniqueId = header.getLong
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxRead(amData)
+                        channel.doReadAmData(amData)
                         STATUS.UCS_OK
                     }
             },
@@ -113,7 +113,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val frameId = header.getInt
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.ucxReadStream(amData, streamId, frameNum, frameId)
+                        channel.doReadStream(amData, streamId, frameNum, frameId)
                         STATUS.UCS_OK
                     }
             },
@@ -413,6 +413,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
         while (ucpWorker.progress() != 0) {}
 
         pendingWakeup = (NativeEpoll.ucpWorkerArm(ucpWorkerId) == STATUS.UCS_OK)
+        ucxChannels.values.forEach(_.processReady)
     }
 
     override

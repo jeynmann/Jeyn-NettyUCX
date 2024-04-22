@@ -31,6 +31,8 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     logDev(s"UcxSocketChannel()")
 
     protected val streamStates = new java.util.HashMap[Int, UcxStreamCallback]
+    protected val freeBufs = new java.util.LinkedList[ByteBuf]
+    protected val readBufs = new java.util.LinkedList[ByteBuf]
     protected val ucxSocketConfig = new UcxSocketChannelConfig(this)
     protected var underlyingUnsafe: UcxClientUnsafe = _
 
@@ -61,6 +63,28 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
     def streamComplete(id: Int): Unit = {
         streamStates.remove(id)
+    }
+
+    def writeComplete(buf: ByteBuf): Unit = {
+        freeBufs.add(buf)
+    }
+
+    def readComplete(buf: ByteBuf): Unit = {
+        readBufs.add(buf)
+    }
+
+    override
+    def processReady(): Unit = {
+        if (!freeBufs.isEmpty) {
+            freeBufs.forEach(_.release())
+            freeBufs.clear()
+        }
+        if (!readBufs.isEmpty()) {
+            val pipe = pipeline()
+            readBufs.forEach(pipe.fireChannelRead(_))
+            readBufs.clear()
+            pipe.fireChannelReadComplete()
+        }
     }
 
     override
@@ -189,6 +213,11 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 throw new UnsupportedOperationException(
                     s"unsupported message type: ${msg.getClass}")
         }
+    }
+
+    override
+    def doHandleConnect(ep: UcpEndpoint, id: Long): Unit = {
+        underlyingUnsafe.handleConnect(ep, id)
     }
 
     override
@@ -523,6 +552,14 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                     streamStates.values().forEach(_.release())
                     streamStates.clear()
                 }
+                if (!freeBufs.isEmpty) {
+                    freeBufs.forEach(_.release())
+                    freeBufs.clear()
+                }
+                if (!readBufs.isEmpty()) {
+                    readBufs.forEach(_.release())
+                    readBufs.clear()
+                }
                 ucpEp = null
             }
 
@@ -601,12 +638,12 @@ class UcxWriteCallback extends UcxCallback with UcxLogging {
     }
 
     override def onSuccess(request: UcpRequest): Unit = {
-        buf.release()
+        channel.writeComplete(buf)
         logDev(s"MESSAGE to ${channel.remoteAddress} success: $buf")
     }
 
     override def onError(status: Int, errorMsg: String): Unit = {
-        buf.release()
+        channel.writeComplete(buf)
         throw new UcxException(
             s"MESSAGE to ${channel.remoteAddress} fail: $errorMsg", status)
     }
@@ -623,7 +660,7 @@ class UcxReadCallback extends UcxCallback with UcxLogging {
     }
 
     override def onSuccess(request: UcpRequest): Unit = {
-        channel.pipeline().fireChannelRead(buf).fireChannelReadComplete()
+        channel.readComplete(buf)
         logDev(s"MESSAGE from ${channel.remoteAddress} success: $buf")
     }
 
@@ -665,7 +702,11 @@ class UcxStreamCallback extends UcxCallback with UcxLogging {
     }
 
     def release(): Unit = {
-        frameBufs.forEach(_.release())
+        frameBufs.forEach(buf => {
+            if (buf != null) {
+                buf.release()
+            }
+        })
         frameBufs.clear()
     }
 
@@ -673,10 +714,10 @@ class UcxStreamCallback extends UcxCallback with UcxLogging {
         remaining -= 1
         if (remaining == 0) {
             val buf = new CompositeByteBuf(alloc, true, frameBufs.size(), frameBufs)
+            channel.readComplete(buf)
+            channel.streamComplete(id)
             logDev(
                 s"STREAM from ${channel.remoteAddress} success: ($id-${frameBufs.size()}) $buf")
-            channel.pipeline().fireChannelRead(buf).fireChannelReadComplete()
-            channel.streamComplete(id)
         }
     }
 

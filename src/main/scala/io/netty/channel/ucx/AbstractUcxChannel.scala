@@ -70,19 +70,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         this(null)
     }
 
-    def ucxRead(ucpAmData: UcpAmData): Unit = {
-        doReadAmData(ucpAmData)
-    }
-
-    def ucxReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int,
-                      frameId: Int): Unit = {
-        doReadStream(ucpAmData, streamId, frameNum, frameId)
-    }
-
-    def ucxHandleConnect(ep: UcpEndpoint, remoteId: Long): Unit = {
-        ucxUnsafe.remoteId.set(remoteId)
-        ucxUnsafe.connectSuccess()
-    }
+    def processReady(): Unit = {}
 
     override
     def config(): UcxChannelConfig = ???
@@ -167,6 +155,11 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
                     promise.tryFailure(annotateConnectException(t, remoteAddress))
                 }
             }
+        }
+
+        def handleConnect(ep: UcpEndpoint, id: Long): Unit = {
+            remoteId.set(id)
+            connectSuccess()
         }
 
         protected def finishConnect(remoteAddress: SocketAddress): Unit = {
@@ -337,11 +330,15 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         throw new UnsupportedOperationException()
     }
 
-    protected def doReadAmData(ucpAmData: UcpAmData): Unit = {
+    def doHandleConnect(ep: UcpEndpoint, id: Long): Unit = {
         throw new UnsupportedOperationException()
     }
 
-    protected def doReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int,
+    def doReadAmData(ucpAmData: UcpAmData): Unit = {
+        throw new UnsupportedOperationException()
+    }
+
+    def doReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int,
                                frameId: Int): Unit = {
         throw new UnsupportedOperationException()
     }

@@ -60,7 +60,7 @@ class NettyUcxBlockTransferService (
   private val authEnabled = securityManager.isAuthenticationEnabled()
   private val transportConf = SparkTransportConf.fromSparkConf(conf, "shuffle", numCores)
 
-  private[this] var transportContext: TransportContext = _
+  private[this] var transportContext: NettyUcxTransportContext = _
   private[this] var server: NettyUcxTransportServer = _
   private[this] var clientFactory: NettyUcxTransportClientFactory = _
   private[this] var appId: String = _
@@ -73,7 +73,7 @@ class NettyUcxBlockTransferService (
       serverBootstrap = Some(new AuthServerBootstrap(transportConf, securityManager))
       clientBootstrap = Some(new AuthClientBootstrap(transportConf, conf.getAppId, securityManager))
     }
-    transportContext = new TransportContext(transportConf, rpcHandler)
+    transportContext = new NettyUcxTransportContext(transportConf, rpcHandler)
     clientFactory = new NettyUcxTransportClientFactory(transportContext, clientBootstrap.toSeq.asJava)
     server = createServer(serverBootstrap.toList, rpcHandler)
     appId = conf.getAppId

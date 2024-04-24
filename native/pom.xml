@@ -15,7 +15,7 @@ See file LICENSE for terms.
     <relativePath>../pom.xml</relativePath>
   </parent>
 
-  <artifactId>ucx-netty</artifactId>
+  <artifactId>ucx-native</artifactId>
   <name>${project.artifactId}</name>
   <description>
     A high-performance, scalable and efficient shuffle manager plugin for netty,
@@ -29,86 +29,64 @@ See file LICENSE for terms.
     <jni.src>${project.basedir}/src/main/c</jni.src>
   </properties>
 
-  <profiles>
-    <profile>
-      <id>4.1.47</id>
-      <activation>
-        <activeByDefault>true</activeByDefault>
-      </activation>
-      <properties>
-        <sonar.exclusions>*/exclusions/*</sonar.exclusions>
-        <scala.version>2.11.12</scala.version>
-        <netty.version>4.1.47.Final</netty.version>
-        <log4j.version>1.2.17</log4j.version>
-        <slf4j.version>1.7.30</slf4j.version>
-      </properties>
-      <dependencies>
-        <dependency>
-          <groupId>org.scala-lang</groupId>
-          <artifactId>scala-library</artifactId>
-          <version>${scala.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>io.netty</groupId>
-          <artifactId>netty-all</artifactId>
-          <version>${netty.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>log4j</groupId>
-          <artifactId>log4j</artifactId>
-          <version>${log4j.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>org.slf4j</groupId>
-          <artifactId>slf4j-api</artifactId>
-          <version>${slf4j.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>org.slf4j</groupId>
-          <artifactId>slf4j-log4j12</artifactId>
-          <version>${slf4j.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>jeyn.netty</groupId>
-          <artifactId>ucx-native</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-      </dependencies>
-    </profile>
-  </profiles>
-
   <build>
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>${osmaven.version}</version>
+      </extension>
+    </extensions>
     <finalName>${project.artifactId}-${project.version}</finalName>
     <plugins>
       <plugin>
-        <groupId>net.alchim31.maven</groupId>
-        <artifactId>scala-maven-plugin</artifactId>
-        <version>4.3.0</version>
-        <configuration>
-          <recompileMode>all</recompileMode>
-          <args>
-            <arg>-nobootcp</arg>
-            <arg>-Xexperimental</arg>
-            <arg>-Xfatal-warnings</arg>
-            <arg>-explaintypes</arg>
-            <arg>-unchecked</arg>
-            <arg>-deprecation</arg>
-            <arg>-feature</arg>
-          </args>
-        </configuration>
+        <groupId>org.fusesource.hawtjni</groupId>
+        <artifactId>maven-hawtjni-plugin</artifactId>
+        <version>1.14</version>
         <executions>
           <execution>
-            <id>compile</id>
+            <id>native_epoll</id>
+            <configuration>
+              <name>native_epoll</name>
+              <nativeSourceDirectory>${jni.src}</nativeSourceDirectory>
+              <libDirectory>${project.build.outputDirectory}</libDirectory>
+              <platform>.</platform>
+              <configureArgs>
+                <arg>${jni.cflags}</arg>
+                <arg>${jni.ldflags}</arg>
+                <configureArg>--libdir=${project.build.directory}/native-build/target/lib</configureArg>
+              </configureArgs>
+            </configuration>
             <goals>
-              <goal>compile</goal>
+              <goal>generate</goal>
+              <goal>build</goal>
             </goals>
-            <phase>compile</phase>
           </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.0.2</version>
+        <executions>
+          <!-- Generate the JAR that contains the native library in it. -->
           <execution>
-            <phase>process-resources</phase>
+            <id>native-jar</id>
             <goals>
-              <goal>compile</goal>
+              <goal>jar</goal>
             </goals>
+            <configuration>
+              <archive>
+                <manifest>
+                  <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                </manifest>
+                <manifestEntries>
+                  <Bundle-NativeCode>META-INF/native/libnative_epoll.so; osname=Linux; processor=${os.detected.arch},*</Bundle-NativeCode>
+                  <Automatic-Module-Name>${javaModuleName}</Automatic-Module-Name>
+                </manifestEntries>
+                <index>true</index>
+              </archive>
+              <classifier>${os.detected.classifier}</classifier>
+            </configuration>
           </execution>
         </executions>
       </plugin>

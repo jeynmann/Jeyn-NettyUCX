@@ -27,6 +27,7 @@ See file LICENSE for terms.
   </licenses>
 
   <modules>
+    <module>native</module>
     <module>netty</module>
     <module>spark</module>
   </modules>
@@ -39,41 +40,17 @@ See file LICENSE for terms.
     <encoding>UTF-8</encoding>
   </properties>
 
+  <dependencies>
+    <dependency>
+      <groupId>org.openucx</groupId>
+      <artifactId>jucx</artifactId>
+      <version>1.16.0</version>
+    </dependency>
+  </dependencies>
+
   <build>
     <finalName>${project.artifactId}-${project.version}</finalName>
     <plugins>
-      <plugin>
-        <groupId>net.alchim31.maven</groupId>
-        <artifactId>scala-maven-plugin</artifactId>
-        <version>4.3.0</version>
-        <configuration>
-          <recompileMode>all</recompileMode>
-          <args>
-            <arg>-nobootcp</arg>
-            <arg>-Xexperimental</arg>
-            <arg>-Xfatal-warnings</arg>
-            <arg>-explaintypes</arg>
-            <arg>-unchecked</arg>
-            <arg>-deprecation</arg>
-            <arg>-feature</arg>
-          </args>
-        </configuration>
-        <executions>
-          <execution>
-            <id>compile</id>
-            <goals>
-              <goal>compile</goal>
-            </goals>
-            <phase>compile</phase>
-          </execution>
-          <execution>
-            <phase>process-resources</phase>
-            <goals>
-              <goal>compile</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
     </plugins>
   </build>
 

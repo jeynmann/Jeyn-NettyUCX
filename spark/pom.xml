@@ -96,20 +96,17 @@ See file LICENSE for terms.
         </dependency>
         <dependency>
           <groupId>jeyn.netty</groupId>
+          <artifactId>ucx-native</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>jeyn.netty</groupId>
           <artifactId>ucx-netty</artifactId>
           <version>${project.version}</version>
         </dependency>
       </dependencies>
     </profile>
   </profiles>
-
-  <dependencies>
-    <dependency>
-      <groupId>org.openucx</groupId>
-      <artifactId>jucx</artifactId>
-      <version>1.16.0</version>
-    </dependency>
-  </dependencies>
 
   <build>
     <finalName>${project.artifactId}-${project.version}</finalName>

@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/mman.h>
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/timerfd.h>
@@ -209,8 +210,64 @@ JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy(JNI
     memcpy((void*) dest, (void*) src, size);
 }
 
-JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose(JNIEnv* env, jclass clazz, jint fd) {
-    close(fd);
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeORdonly(JNIEnv* env, jclass clazz) {
+    return O_RDONLY;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOWronly(JNIEnv* env, jclass clazz) {
+    return O_WRONLY;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeORdwr(JNIEnv* env, jclass clazz) {
+    return O_RDWR;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOpen(JNIEnv* env, jclass clazz, jstring path, jint flags) {
+    return open((*env)->GetStringUTFChars(env, path, 0), flags);
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose(JNIEnv* env, jclass clazz, jint fd) {
+    return close(fd);
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtRead(JNIEnv* env, jclass clazz) {
+    return PROT_READ;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtWrite(JNIEnv* env, jclass clazz) {
+    return PROT_WRITE;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtExec(JNIEnv* env, jclass clazz) {
+    return PROT_EXEC;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapShared(JNIEnv* env, jclass clazz) {
+    return MAP_SHARED;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapPrivate(JNIEnv* env, jclass clazz) {
+    return MAP_PRIVATE;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapFixed(JNIEnv* env, jclass clazz) {
+    return MAP_FIXED;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapPopulate(JNIEnv* env, jclass clazz) {
+    return MAP_POPULATE;
+}
+
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapFailed(JNIEnv* env, jclass clazz) {
+    return (jlong) MAP_FAILED;
+}
+
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMmap(JNIEnv* env, jclass clazz, jlong address, jlong len, jint prot, jint flags, jint fd, jlong offset) {
+    return (jlong) mmap((void*) address, len, prot, flags, fd, offset);
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMunmap(JNIEnv* env, jclass clazz, jlong address, jlong len) {
+    return munmap((void*) address, len);
 }
 
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeUcpWorkerArm(JNIEnv* env, jclass clazz, jlong ucp_worker_ptr) {

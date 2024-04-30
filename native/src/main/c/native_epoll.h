@@ -193,6 +193,94 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeEventsFrom
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeORdonly
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeORdonly
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeOWronly
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOWronly
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeORdwr
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeORdwr
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeProtRead
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtRead
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeProtWrite
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtWrite
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeProtExec
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtExec
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMapShared
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapShared
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMapPrivate
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapPrivate
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMapFixed
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapFixed
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMapPopulate
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapPopulate
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMapFailed
+ * Signature: ()I
+ */
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapFailed
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
  * Method:    nativeMalloc
  * Signature: (J)J
  */
@@ -209,10 +297,18 @@ JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeFree
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeClose
- * Signature: (I)V
+ * Method:    nativeOpen
+ * Signature: (Ljava/lang/String;I)I
  */
-JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOpen
+  (JNIEnv *, jclass, jstring, jint);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeClose
+ * Signature: (I)I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose
   (JNIEnv *, jclass, jint);
 
 /*
@@ -225,8 +321,24 @@ JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMmap
+ * Signature: (JJIIIJ)J
+ */
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMmap
+  (JNIEnv *, jclass, jlong, jlong, jint, jint, jint, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMunmap
+ * Signature: (JJ)I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMunmap
+  (JNIEnv *, jclass, jlong, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
  * Method:    nativeUcpWorkerArm
- * Signature: (I)I
+ * Signature: (J)I
  */
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeUcpWorkerArm
   (JNIEnv *, jclass, jlong);

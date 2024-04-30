@@ -37,10 +37,28 @@ class NativeEpollApi {
     static native int nativeFdFromEpollEvents(long address, int id);
     static native int nativeEventsFromEpollEvents(long address, int id);
 
+    static native int nativeORdonly();
+    static native int nativeOWronly();
+    static native int nativeORdwr();
+
+    static native int nativeProtRead();
+    static native int nativeProtWrite();
+    static native int nativeProtExec();
+
+    static native int nativeMapShared();
+    static native int nativeMapPrivate();
+    static native int nativeMapFixed();
+    static native int nativeMapPopulate();
+    static native int nativeMapFailed();
+
     static native long nativeMalloc(long size);
     static native void nativeFree(long address);
-    static native void nativeClose(int fd);
+    static native int nativeOpen(String path, int flags);
+    static native int nativeClose(int fd);
     static native void nativeMemcpy(long dest, long src, long size);
+
+    static native long nativeMmap(long address, long len, int prot, int flags, int fd, long offset);
+    static native int nativeMunmap(long address, long len);
 
     static native int nativeUcpWorkerArm(long nativeId);
 
@@ -144,6 +162,20 @@ public class NativeEpoll extends NativeEpollApi {
 
     public static final int EPOLL_EVENT_SIZE = nativeEPollEventSize();
     public static final int EPOLL_DATA_OFFSET = nativeEPollDataOffset();
+
+    public static int O_RDONLY = nativeORdonly();
+    public static int O_WRONLY = nativeOWronly();
+    public static int O_RDWR = nativeORdwr();
+
+    public static int PROT_READ = nativeProtRead();
+    public static int PROT_WRITE = nativeProtWrite();
+    public static int PROT_EXEC = nativeProtExec();
+
+    public static int MAP_SHARED = nativeMapShared();
+    public static int MAP_PRIVATE = nativeMapPrivate();
+    public static int MAP_FIXED = nativeMapFixed();
+    public static int MAP_POPULATE = nativeMapPopulate();
+    public static long MAP_FAILED = nativeMapFailed();
 
     public static int newEventFd() throws IOException {
         int efd = nativeEventFd();
@@ -269,8 +301,19 @@ public class NativeEpoll extends NativeEpollApi {
         return nativeEventsFromEpollEvents(address, id);
     }
 
-    public static void close(int fd) {
-        nativeClose(fd);
+    static int open(String path, int flags) throws IOException {
+        int fd = nativeOpen(path, flags);
+        if (fd < 0) {
+            throw new IOException("open: " + fd);
+        }
+        return fd;
+    }
+
+    public static void close(int fd) throws IOException {
+        int res = nativeClose(fd);
+        if (res < 0) {
+            throw new IOException("close: " + res);
+        }
     }
 
     public static long alloc(long size) {
@@ -283,6 +326,21 @@ public class NativeEpoll extends NativeEpollApi {
 
     public static void memcpy(long dest, long src, long size) {
         nativeMemcpy(dest, src, size);
+    }
+
+    public static long mmap(long address, long len, int prot, int flags, int fd, long offset) throws IOException {
+        long mapAddress = nativeMmap(address, len, prot, flags, fd, offset);
+        if (mapAddress == MAP_FAILED) {
+            throw new IOException("mmap: " + mapAddress);
+        }
+        return mapAddress;
+    }
+
+    public static void munmap(long address, long len) throws IOException {
+        int res = nativeMunmap(address, len);
+        if (res < 0) {
+            throw new IOException("munmap: " + res);
+        }
     }
 
     public static int ucpWorkerArm(long nativeId) {

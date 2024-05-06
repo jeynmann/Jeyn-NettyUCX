@@ -113,6 +113,14 @@ object MmapUtils extends UcxLogging {
                 logError(e.getMessage)
         }
     }
+
+    def alignDown(n: Long, alignment: Long): Long = {
+        n & ~(alignment - 1)
+    }
+
+    def alignUp(n: Long, alignment: Long): Long = {
+        (n + alignment - 1) & ~(alignment-1)
+    }
 }
 
 class UcxDebuger extends UcxLogging {

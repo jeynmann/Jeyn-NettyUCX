@@ -116,6 +116,7 @@ class UcxServerSocketChannel(parent: Channel)
         def doClose0():Unit = {
             if (ucpListener != null) {
                 logDev(s"doClose0()")
+                opened = false
                 ucxEventLoop.delChannel(ucpListener.getNativeId())
                 ucpListener.close()
                 ucpListener = null

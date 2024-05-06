@@ -46,7 +46,7 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     logDev(s"UcxEventLoop() parent $parent executor $executor ucpContext $ucpContext")
 
     private val ucxChannels = new ConcurrentHashMap[Long, AbstractUcxChannel]
-    // private val ucpAmDatas = new java.util.LinkedList[UcpAmData]
+    // private val ucpAmDatas = new java.util.concurrent.ConcurrentLinkedQueue[UcpAmData]
 
     private val ucpWorkerParams = new UcpWorkerParams().requestThreadSafety()
 
@@ -95,10 +95,14 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val channel = ucxChannels.get(uniqueId)
 
                         channel.doReadAmData(amData)
+                        // if (amData.isDataValid)
+                        // STATUS.UCS_INPROGRESS
+                        // else
                         STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
+            // UcpConstants.UCP_AM_FLAG_WHOLE_MSG | UcpConstants.UCP_AM_FLAG_PERSISTENT_DATA)
 
         ucpWorker.setAmRecvHandler(
             UcxAmId.STREAM,
@@ -114,10 +118,14 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                         val channel = ucxChannels.get(uniqueId)
 
                         channel.doReadStream(amData, streamId, frameNum, frameId)
+                        // if (amData.isDataValid)
+                        // STATUS.UCS_INPROGRESS
+                        // else
                         STATUS.UCS_OK
                     }
             },
             UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
+            // UcpConstants.UCP_AM_FLAG_WHOLE_MSG | UcpConstants.UCP_AM_FLAG_PERSISTENT_DATA)
 
         ucpWorker
     }
@@ -411,9 +419,8 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
     private def processReady(): Unit = {
         // clearAmData()
         while (ucpWorker.progress() != 0) {}
-
-        pendingWakeup = (NativeEpoll.ucpWorkerArm(ucpWorkerId) == STATUS.UCS_OK)
         ucxChannels.values.forEach(_.processReady)
+        pendingWakeup = (NativeEpoll.ucpWorkerArm(ucpWorkerId) == STATUS.UCS_OK)
     }
 
     override

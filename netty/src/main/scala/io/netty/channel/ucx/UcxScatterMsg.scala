@@ -2,7 +2,10 @@ package io.netty.channel.ucx
 
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.CompositeByteBuf
+import io.netty.buffer.UcxUnsafeDirectByteBuf
 import io.netty.buffer.ByteBufAllocator
+import io.netty.buffer.PooledByteBufAllocator
+import io.netty.buffer.Unpooled
 import io.netty.channel.FileRegion
 import io.netty.channel.DefaultFileRegion
 import io.netty.util.ReferenceCounted
@@ -44,6 +47,20 @@ object UcxConverter {
         directBuf.writeBytes(fc, offset, length.toInt)
         fr.release()
         directBuf
+    }
+
+    def toDirectByteBuf(fr: UcxFileRegion, fc: FileChannel, offset: Long,
+                        length: Long, alloc: ByteBufAllocator): ByteBuf = {
+        val directBuf = alloc.directBuffer(length.toInt, length.toInt)
+
+        directBuf.writeBytes(fc, offset, length.toInt)
+        fr.release()
+        directBuf
+    }
+
+    def toMapedByteBuf(fr: UcxFileRegion, mmapPtr: Long, offset: Long, length: Long,
+                       alloc: ByteBufAllocator): ByteBuf = {
+        new UcxUnsafeDirectByteBuf(alloc, mmapPtr + offset, length.toInt, _ => fr.release())
     }
 }
 
@@ -109,7 +126,23 @@ class UcxDefaultFileRegionFrame(
     // file could be very large, use lazy load here
     override
     def convertToByteBuf(): ByteBuf = {
+        val offset = this.offset + fr.position() 
         UcxConverter.toDirectByteBuf(fr, fc, offset, length, alloc)
+    }
+}
+
+class UcxUcxFileRegionFrame(
+    fr: UcxFileRegion, offset: Long, length: Long,
+    alloc: ByteBufAllocator) extends UcxMsgFrame(fr) {
+    // file could be very large, use lazy load here
+    override
+    def convertToByteBuf(): ByteBuf = {
+        if (fr.canMmap()) {
+            UcxConverter.toMapedByteBuf(fr, fr.getMmap(), offset, length, alloc)
+        } else {
+            val offset = this.offset + fr.position() 
+            UcxConverter.toDirectByteBuf(fr, fr.getChannel(), offset, length, alloc)
+        }
     }
 }
 
@@ -208,12 +241,12 @@ trait UcxFileRegionMsg extends UcxScatterMsg {
 
         val limit = offset + length
         var offsetNow = offset
-        while (offsetNow != limit) {
+        do {
             val lengthNow = (limit - offsetNow).toInt.min(frameSize)
             val frame = new UcxFileRegionFrame(fr, offsetNow, lengthNow, alloc)
             frames.add(frame)
             offsetNow += lengthNow
-        }
+        } while (offsetNow != limit)
 
         fr.retain(count - 1)
         writerIndex += count
@@ -222,14 +255,14 @@ trait UcxFileRegionMsg extends UcxScatterMsg {
 
 trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
 
-    def addDefaultFileRegion(fr: DefaultFileRegion): Unit = {
-        val offset = fr.position() + fr.transferred()
+    def addDefaultFileRegion2(fr: DefaultFileRegion): Unit = {
+        val offset = fr.position()
         val length = fr.count() - fr.transferred()
         if (length == 0) {
             return
         }
 
-        val fc: FileChannel = UcxDefaultFileRegionMsg.getChannel(fr)
+        val fc = UcxFileRegion.getChannel(fr)
         if (length <= frameSize) {
             val frame = new UcxDefaultFileRegionFrame(fr, fc, offset, length, alloc)
             frames.add(frame)
@@ -242,40 +275,48 @@ trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
 
         val limit = offset + length
         var offsetNow = offset
-        while (offsetNow != limit) {
+        do {
             val lengthNow = (limit - offsetNow).toInt.min(frameSize)
             val frame = new UcxDefaultFileRegionFrame(fr, fc, offsetNow, lengthNow, alloc)
             frames.add(frame)
             offsetNow += lengthNow
-        }
-        logDev(s"write $frames-$count $offset-$offsetNow-$length")
+        } while (offsetNow != limit)
+        logDev(s"write $frames-$count $offset-$offsetNow-$limit")
 
         fr.retain(count - 1)
         writerIndex += count
     }
-}
 
-object UcxDefaultFileRegionMsg {
-    private val clazz = classOf[DefaultFileRegion]
-    private val fileField = clazz.getDeclaredField("file")
+    def addDefaultFileRegion(region: DefaultFileRegion): Unit = {
+        val fr = new UcxFileRegion(region)
+        val offset = fr.transferred()
+        val length = fr.count() - fr.transferred()
+        if (length == 0) {
+            return
+        }
 
-    fileField.setAccessible(true)
+        if (length <= frameSize) {
+            val frame = new UcxUcxFileRegionFrame(fr, offset, length, alloc)
+            frames.add(frame)
+            writerIndex += 1
+            return
+        }
 
-    def getChannel(fr: DefaultFileRegion): FileChannel = {
-        fr.open()
-        return fileField.get(fr).asInstanceOf[FileChannel]
-    }
+        val count = ((length - 1) / frameSize).toInt + 1
+        ensureCapacity(writerIndex + count)
 
-    def copyDefaultFileRegion(fileChannel: FileChannel, offset: Long,
-                              length: Long, directBuf: ByteBuf): Unit = {
-        val mapBuf = fileChannel.map(FileChannel.MapMode.READ_ONLY,
-                                     offset, length)
-        directBuf.writeBytes(mapBuf)
-    }
+        val limit = offset + length
+        var offsetNow = offset
+        do {
+            val lengthNow = (limit - offsetNow).toInt.min(frameSize)
+            val frame = new UcxUcxFileRegionFrame(fr, offsetNow, lengthNow, alloc)
+            frames.add(frame)
+            offsetNow += lengthNow
+        } while (offsetNow != limit)
+        logDev(s"write $frames-$count $offset-$offsetNow-$limit")
 
-    def readDefaultFileRegion(fileChannel: FileChannel, offset: Long,
-                              length: Long, directBuf: ByteBuf): Unit = {
-        directBuf.writeBytes(fileChannel, offset, length.toInt)
+        fr.retain(count - 1)
+        writerIndex += count
     }
 }
 

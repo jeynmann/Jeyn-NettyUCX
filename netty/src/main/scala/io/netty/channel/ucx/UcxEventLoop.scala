@@ -321,7 +321,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
 
     override
     protected def run(): Unit = {
-        UcxEventLoop.localWorker.set(this)
         while (true) {
             try {
                 var strategy = selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())
@@ -408,11 +407,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
         // Using the intermediate collection to prevent ConcurrentModificationException.
         // In the `close()` method, the channel is deleted from `channels` map.
         ucxChannels.values.forEach(_.close())
-        if (ucpWorker != null) {
-            UcxEventLoop.localWorker.set(null)
-            ucpWorker.close()
-            ucpWorker = null
-        }
     }
 
     // Returns true if a timerFd event was encountered
@@ -439,6 +433,13 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
             }
 
             try {
+                ucpWorker.close()
+            } catch {
+                case e: Exception =>
+                    logWarning("Failed to close the ucp worker.", e)
+            }
+
+            try {
                 NativeEpoll.close(eventFd)
             } catch {
                 case e: Exception =>
@@ -458,8 +459,6 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
 }
 
 object UcxEventLoop {
-    final val localWorker = new ThreadLocal[UcxEventLoop]
-
     final val DEFAULT_MAX_PENDING_TASKS = SystemPropertyUtil.getInt(
         "io.netty.eventLoop.maxPendingTasks", Integer.MAX_VALUE).max(16)
 

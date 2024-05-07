@@ -121,7 +121,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     override
     protected def doWrite(in: ChannelOutboundBuffer): Unit = {
         // write unfinished
-        var spinCount = config().getWriteSpinCount() - writeInFlight / 4
+        var spinCount = config().getWriteSpinCount() - writeInFlight
         while (!in.isEmpty() && spinCount > 0) {
             val msg = in.current()
             msg match {
@@ -382,6 +382,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
     override
     protected def doClose(): Unit = {
         eventLoopRun(() => try {
+            opened = false
             ucxUnsafe.doClose0()
         } catch {
             case e: Throwable => pipeline().fireExceptionCaught(e)
@@ -402,10 +403,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 } else {
                     logWarning(s"$ep: $errorMsg")
                 }
-                opened = false
                 close(voidPromise())
-                underlyingLoop.delChannel(ep.getNativeId())
-                underlyingLoop = null
             }
         }
 
@@ -501,7 +499,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
                 doExchangeId0()
 
-                local = ucpEp.getLocalAddress()
+                // local = ucpEp.getLocalAddress()
             } catch {
                 case e: Throwable => {
                     logError(s"CONNECT $local -x-> $remote: $e $ucpEpParam")
@@ -540,7 +538,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
         override
         def doClose0(): Unit = {
-            opened = false
             shutdown().sync()
         }
 
@@ -625,7 +622,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
         override
         def connectFailed(status: Int, errorMsg: String): Unit = {
-            opened = false
             val e = new UcxException(errorMsg, status)
             if (connectPromise != null && connectPromise.tryFailure(e)) {
                 close(voidPromise())

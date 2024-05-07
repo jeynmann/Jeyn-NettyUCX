@@ -34,7 +34,7 @@ class UcxFileRegion(protected val f: File, protected var offset: Long,
 
     protected var fd: Int = -1
     protected var mmapPtr: Long = 0l
-    protected var ucpMem: UcpMemory = null
+    // protected var ucpMem: UcpMemory = null
 
     def this(fr: DefaultFileRegion) = {
         this(UcxFileRegion.getFile(fr), fr.position(), fr.count())
@@ -59,8 +59,8 @@ class UcxFileRegion(protected val f: File, protected var offset: Long,
         fd = NativeEpoll.open(f.toString(), UcxFileRegion.O_RDWR)
         mmapPtr = NativeEpoll.mmap(0, length, UcxFileRegion.MAP_PROT,
                                    UcxFileRegion.MAP_FLAG, fd, offset)
-        ucpMem = UcxPooledByteBufAllocator.UCP_CONTEXT.memoryMap(
-            new UcpMemMapParams().setAddress(mmapPtr).setLength(length));
+        // ucpMem = UcxPooledByteBufAllocator.UCP_CONTEXT.memoryMap(
+        //     new UcpMemMapParams().setAddress(mmapPtr).setLength(length));
         return mmapPtr
     }
 
@@ -123,7 +123,7 @@ class UcxFileRegion(protected val f: File, protected var offset: Long,
         if (mmapPtr != 0l) {
             this.mmapPtr = 0l
             try {
-                ucpMem.deregister()
+                // ucpMem.deregister()
                 NativeEpoll.close(fd)
                 NativeEpoll.munmap(mmapPtr, length)
             } catch {

@@ -255,8 +255,8 @@ trait UcxFileRegionMsg extends UcxScatterMsg {
 
 trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
 
-    def addDefaultFileRegion2(fr: DefaultFileRegion): Unit = {
-        val offset = fr.position()
+    def addDefaultFileRegion(fr: DefaultFileRegion): Unit = {
+        val offset = fr.transferred()
         val length = fr.count() - fr.transferred()
         if (length == 0) {
             return
@@ -287,7 +287,7 @@ trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
         writerIndex += count
     }
 
-    def addDefaultFileRegion(region: DefaultFileRegion): Unit = {
+    def addDefaultFileRegion2(region: DefaultFileRegion): Unit = {
         val fr = new UcxFileRegion(region)
         val offset = fr.transferred()
         val length = fr.count() - fr.transferred()

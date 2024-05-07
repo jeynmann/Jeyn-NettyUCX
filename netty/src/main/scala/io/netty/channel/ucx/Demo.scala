@@ -1,4 +1,4 @@
-package io.netty.channel.ucx
+package io.netty.channel.ucx.examples
 
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -10,6 +10,7 @@ import io.netty.buffer.Unpooled
 import io.netty.bootstrap.Bootstrap
 import io.netty.bootstrap.ServerBootstrap
 
+import io.netty.channel.ucx._
 import io.netty.channel.Channel
 import io.netty.channel.ChannelOption
 import io.netty.channel.ChannelFuture

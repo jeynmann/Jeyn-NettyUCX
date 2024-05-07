@@ -55,3 +55,7 @@ class UcxEventLoopGroup(nThreads: Int = 0, executor: Executor = null,
                 args(3).asInstanceOf[UcpContext])
     }
 }
+
+object UcxEventLoopGroup {
+    UcxPooledByteBufAllocator.loadNativeLibs()
+}

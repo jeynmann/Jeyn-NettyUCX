@@ -92,32 +92,10 @@ class UcxEventLoop(parent: EventLoopGroup, executor: Executor,
                     ep: UcpEndpoint): Int = {
                         val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
                         val uniqueId = header.getLong
+                        val sn = header.getInt
                         val channel = ucxChannels.get(uniqueId)
 
-                        channel.doReadAmData(amData)
-                        // if (amData.isDataValid)
-                        // STATUS.UCS_INPROGRESS
-                        // else
-                        STATUS.UCS_OK
-                    }
-            },
-            UcpConstants.UCP_AM_FLAG_WHOLE_MSG)
-            // UcpConstants.UCP_AM_FLAG_WHOLE_MSG | UcpConstants.UCP_AM_FLAG_PERSISTENT_DATA)
-
-        ucpWorker.setAmRecvHandler(
-            UcxAmId.STREAM,
-            new UcpAmRecvCallback {
-                override def onReceive(
-                    headerAddress: Long, headerSize: Long, amData: UcpAmData,
-                    ep: UcpEndpoint): Int = {
-                        val header = UnsafeUtils.getByteBufferView(headerAddress, headerSize.toInt)
-                        val uniqueId = header.getLong
-                        val streamId = header.getInt
-                        val frameNum = header.getInt
-                        val frameId = header.getInt
-                        val channel = ucxChannels.get(uniqueId)
-
-                        channel.doReadStream(amData, streamId, frameNum, frameId)
+                        channel.doReadAmData(amData, sn)
                         // if (amData.isDataValid)
                         // STATUS.UCS_INPROGRESS
                         // else

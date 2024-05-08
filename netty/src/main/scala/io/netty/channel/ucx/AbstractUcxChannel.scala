@@ -88,8 +88,8 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
     protected def newUnsafe(): AbstractUnsafe = ???
 
     protected abstract class AbstractUcxUnsafe extends AbstractUnsafe {
-        protected[ucx] val uniqueId = new NettyUcxId()
-        protected[ucx] val remoteId = new NettyUcxId()
+        protected[ucx] val uniqueId = new NettyUcxId(0)
+        protected[ucx] val remoteId = new NettyUcxId(UnsafeUtils.INT_SIZE)
         protected[ucx] var allocHandle: UcxRecvByteAllocatorHandle = _
 
         protected[ucx] def ucpWorker = ucxEventLoop.ucpWorker
@@ -334,12 +334,7 @@ abstract class AbstractUcxChannel(parent: Channel) extends AbstractChannel(paren
         throw new UnsupportedOperationException()
     }
 
-    def doReadAmData(ucpAmData: UcpAmData): Unit = {
-        throw new UnsupportedOperationException()
-    }
-
-    def doReadStream(ucpAmData: UcpAmData, streamId: Int, frameNum: Int,
-                               frameId: Int): Unit = {
+    def doReadAmData(ucpAmData: UcpAmData, sn: Int): Unit = {
         throw new UnsupportedOperationException()
     }
 

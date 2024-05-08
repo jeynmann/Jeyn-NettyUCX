@@ -10,13 +10,15 @@ import java.math.{MathContext, RoundingMode}
 
 import sun.nio.ch.{DirectBuffer, FileChannelImpl}
 
-class NettyUcxId {
-    private val buf = ByteBuffer.allocateDirect(UnsafeUtils.LONG_SIZE)
+class NettyUcxId(extraSize: Int = 0) {
+    private val buf = ByteBuffer.allocateDirect(offset + extraSize)
     private var id: Long = 0
 
     set(address())
 
     def address(): Long = UnsafeUtils.getAddress(buf)
+
+    def offset() = UnsafeUtils.LONG_SIZE
 
     def directBuffer(): ByteBuffer = {
         buf.duplicate()

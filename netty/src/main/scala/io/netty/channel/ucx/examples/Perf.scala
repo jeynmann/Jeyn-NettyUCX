@@ -148,10 +148,12 @@ class PerfClient(bindAddress: InetSocketAddress, remoteAddress: InetSocketAddres
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS.asInstanceOf[ChannelOption[Any]], 5000)
 
 
+        val wrokerCost = new Array[Double](numWorker)
+        val wrokerSend = new Array[Double](numWorker)
         val threads = (0 until numWorker).map(id => {
             new Thread(() => {
                 try {
-                    val startTime = System.currentTimeMillis()
+                    val startTime = System.nanoTime()
                     val file = new File(s"$filePrefix$id.txt")
                     val channel = bootstrap.connect(remoteAddress, bindAddress).sync().channel()
                     channel match {
@@ -184,8 +186,9 @@ class PerfClient(bindAddress: InetSocketAddress, remoteAddress: InetSocketAddres
                     while (inFlight != 0) {
                         Thread.`yield`()
                     }
-                    val costTime = System.currentTimeMillis() - startTime
-                    logInfo(s"cost $costTime ms bw ${((send * 1000) >> 20) / costTime} MB/s")
+                    val costTime = System.nanoTime() - startTime
+                    wrokerCost(id) = costTime / 1000000.0
+                    wrokerSend(id) = send / 1048576.0
                     channel.close().sync()
                 } catch {
                     case e: InterruptedException =>
@@ -197,6 +200,8 @@ class PerfClient(bindAddress: InetSocketAddress, remoteAddress: InetSocketAddres
         })
         threads.foreach(_.start)
         threads.foreach(_.join)
+        logInfo(s"cost ${wrokerCost.sum / wrokerCost.size} ms " +
+                s"bw ${wrokerCost.sum * 1000.0 / wrokerSend.sum} MB/s")
     }
 }
 

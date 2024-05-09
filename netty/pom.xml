@@ -27,7 +27,16 @@ See file LICENSE for terms.
     <jni.cflags>CFLAGS=-O3 -pipe -Werror -fvisibility=hidden</jni.cflags>
     <jni.ldflags>LDFLAGS=-O3 -pipe -lucp -Wl,--no-as-needed -Wl,--whole-archive -Wl,--no-whole-archive</jni.ldflags>
     <jni.src>${project.basedir}/src/main/c</jni.src>
+    <scala.version>2.11.12</scala.version>
   </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.scala-lang</groupId>
+      <artifactId>scala-library</artifactId>
+      <version>${scala.version}</version>
+    </dependency>
+  </dependencies>
 
   <profiles>
     <profile>
@@ -35,19 +44,66 @@ See file LICENSE for terms.
       <activation>
         <activeByDefault>true</activeByDefault>
       </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>net.alchim31.maven</groupId>
+            <artifactId>scala-maven-plugin</artifactId>
+            <configuration>
+              <excludes>
+                <exclude>**/ucx/examples/**</exclude>
+              </excludes>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
       <properties>
         <sonar.exclusions>*/exclusions/*</sonar.exclusions>
-        <scala.version>2.11.12</scala.version>
         <netty.version>4.1.47.Final</netty.version>
         <log4j.version>1.2.17</log4j.version>
         <slf4j.version>1.7.30</slf4j.version>
       </properties>
       <dependencies>
         <dependency>
-          <groupId>org.scala-lang</groupId>
-          <artifactId>scala-library</artifactId>
-          <version>${scala.version}</version>
+          <groupId>io.netty</groupId>
+          <artifactId>netty-all</artifactId>
+          <version>${netty.version}</version>
+          <scope>provided</scope>
         </dependency>
+        <dependency>
+          <groupId>log4j</groupId>
+          <artifactId>log4j</artifactId>
+          <version>${log4j.version}</version>
+          <scope>provided</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-api</artifactId>
+          <version>${slf4j.version}</version>
+          <scope>provided</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-log4j12</artifactId>
+          <version>${slf4j.version}</version>
+          <scope>provided</scope>
+        </dependency>
+        <dependency>
+          <groupId>jeyn.netty</groupId>
+          <artifactId>ucx-native</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>4.1.47-example</id>
+      <properties>
+        <sonar.exclusions>*/exclusions/*</sonar.exclusions>
+        <netty.version>4.1.47.Final</netty.version>
+        <log4j.version>1.2.17</log4j.version>
+        <slf4j.version>1.7.30</slf4j.version>
+      </properties>
+      <dependencies>
         <dependency>
           <groupId>io.netty</groupId>
           <artifactId>netty-all</artifactId>

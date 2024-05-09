@@ -90,19 +90,8 @@ public final class NettyUcxMessageEncoder extends MessageToMessageEncoder<Messag
     assert header.writableBytes() == 0;
 
     if (body != null) {
-      // We transfer ownership of the reference on in.body() to UcxScatterMessage.
-      // This reference will be freed when UcxScatterMessage.deallocate() is called.
-      UcxScatterMessage ucxMessage = new UcxScatterMessage(
-        (io.netty.channel.ucx.UcxSocketChannel) ctx.channel());
-      ucxMessage.addByteBuf(header);
-      if (body instanceof DefaultFileRegion) {
-        ucxMessage.addDefaultFileRegion((DefaultFileRegion) body);
-      } else if (body instanceof ByteBuf) {
-        ucxMessage.addByteBuf((ByteBuf) body);
-      } else if (body instanceof FileRegion) {
-        ucxMessage.addFileRegion((FileRegion) body);
-      }
-      out.add(ucxMessage);
+      out.add(header);
+      out.add(body);
     } else {
       out.add(header);
     }

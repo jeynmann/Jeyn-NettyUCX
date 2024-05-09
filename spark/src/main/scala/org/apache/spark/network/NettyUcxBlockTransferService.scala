@@ -193,8 +193,3 @@ class NettyUcxBlockTransferService (
     }
   }
 }
-
-object NettyUcxBlockTransferService {
-  val FILE_FRAME_SIZE_KEY = "spark.shuffle.io.fileFrameSize"
-  val FILE_FRAME_SIZE_DEFAULT = 32 << 10
-}

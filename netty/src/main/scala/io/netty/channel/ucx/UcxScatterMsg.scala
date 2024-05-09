@@ -49,6 +49,7 @@ object UcxConverter {
         directBuf
     }
 
+    @Deprecated
     def toDirectByteBuf(fr: UcxFileRegion, fc: FileChannel, offset: Long,
                         length: Long, alloc: ByteBufAllocator): ByteBuf = {
         val directBuf = alloc.directBuffer(length.toInt, length.toInt)
@@ -58,9 +59,11 @@ object UcxConverter {
         directBuf
     }
 
+    @Deprecated
     def toMapedByteBuf(fr: UcxFileRegion, mmapPtr: Long, offset: Long, length: Long,
                        alloc: ByteBufAllocator): ByteBuf = {
-        new UcxUnsafeDirectByteBuf(alloc, mmapPtr + offset, length.toInt, _ => fr.release())
+        new UcxUnsafeDirectByteBuf(alloc, mmapPtr + offset, length.toInt,
+                                   _ => fr.release())
     }
 }
 
@@ -131,17 +134,18 @@ class UcxDefaultFileRegionFrame(
     }
 }
 
+@Deprecated
 class UcxUcxFileRegionFrame(
-    fr: UcxFileRegion, offset: Long, length: Long,
-    alloc: ByteBufAllocator) extends UcxMsgFrame(fr) {
+    fr: UcxFileRegion, offset: Long, length: Long, alloc: ByteBufAllocator)
+    extends UcxMsgFrame(fr) {
     // file could be very large, use lazy load here
     override
     def convertToByteBuf(): ByteBuf = {
-        if (fr.canMmap()) {
-            UcxConverter.toMapedByteBuf(fr, fr.getMmap(), offset, length, alloc)
-        } else {
+        if (!fr.canMmap()) {
             val offset = this.offset + fr.position() 
             UcxConverter.toDirectByteBuf(fr, fr.getChannel(), offset, length, alloc)
+        } else {
+            UcxConverter.toMapedByteBuf(fr, fr.getMmap(), offset, length, alloc)
         }
     }
 }
@@ -273,43 +277,19 @@ trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
         val count = ((length - 1) / frameSize).toInt + 1
         ensureCapacity(writerIndex + count)
 
+        val frameSize2 = frameSize << 1
         val limit = offset + length
         var offsetNow = offset
         do {
-            val lengthNow = (limit - offsetNow).toInt.min(frameSize)
+            val remaining = (limit - offsetNow).toInt
+            val lengthNow = if (remaining > frameSize2) {
+                frameSize
+            } else if (remaining > frameSize) {
+                remaining >> 1
+            } else {
+                remaining
+            }
             val frame = new UcxDefaultFileRegionFrame(fr, fc, offsetNow, lengthNow, alloc)
-            frames.add(frame)
-            offsetNow += lengthNow
-        } while (offsetNow != limit)
-        logDev(s"write $frames-$count $offset-$offsetNow-$limit")
-
-        fr.retain(count - 1)
-        writerIndex += count
-    }
-
-    def addDefaultFileRegion2(region: DefaultFileRegion): Unit = {
-        val fr = new UcxFileRegion(region)
-        val offset = fr.transferred()
-        val length = fr.count() - fr.transferred()
-        if (length == 0) {
-            return
-        }
-
-        if (length <= frameSize) {
-            val frame = new UcxUcxFileRegionFrame(fr, offset, length, alloc)
-            frames.add(frame)
-            writerIndex += 1
-            return
-        }
-
-        val count = ((length - 1) / frameSize).toInt + 1
-        ensureCapacity(writerIndex + count)
-
-        val limit = offset + length
-        var offsetNow = offset
-        do {
-            val lengthNow = (limit - offsetNow).toInt.min(frameSize)
-            val frame = new UcxUcxFileRegionFrame(fr, offsetNow, lengthNow, alloc)
             frames.add(frame)
             offsetNow += lengthNow
         } while (offsetNow != limit)

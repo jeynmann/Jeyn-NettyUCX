@@ -1,8 +1,5 @@
 package io.netty.channel.ucx
 
-import org.openucx.jucx.ucp.UcpMemory
-import org.openucx.jucx.ucp.UcpMemMapParams
-
 import io.netty.util.AbstractReferenceCounted
 import io.netty.util.IllegalReferenceCountException
 import io.netty.util.internal.ObjectUtil
@@ -23,7 +20,10 @@ import java.nio.channels.WritableByteChannel
  *
  * Be aware that the {@link FileChannel} will be automatically closed once {@link #refCnt()} returns
  * {@code 0}.
+ *
+ * mmap is slower than read in pipeline.
  */
+@Deprecated
 class UcxFileRegion(protected val f: File, protected var offset: Long,
                     protected var length: Long)
     extends AbstractReferenceCounted with FileRegion with UcxLogging {
@@ -34,7 +34,6 @@ class UcxFileRegion(protected val f: File, protected var offset: Long,
 
     protected var fd: Int = -1
     protected var mmapPtr: Long = 0l
-    // protected var ucpMem: UcpMemory = null
 
     def this(fr: DefaultFileRegion) = {
         this(UcxFileRegion.getFile(fr), fr.position(), fr.count())
@@ -59,8 +58,6 @@ class UcxFileRegion(protected val f: File, protected var offset: Long,
         fd = NativeEpoll.open(f.toString(), UcxFileRegion.O_RDWR)
         mmapPtr = NativeEpoll.mmap(0, length, UcxFileRegion.MAP_PROT,
                                    UcxFileRegion.MAP_FLAG, fd, offset)
-        // ucpMem = UcxPooledByteBufAllocator.UCP_CONTEXT.memoryMap(
-        //     new UcpMemMapParams().setAddress(mmapPtr).setLength(length));
         return mmapPtr
     }
 
@@ -123,7 +120,6 @@ class UcxFileRegion(protected val f: File, protected var offset: Long,
         if (mmapPtr != 0l) {
             this.mmapPtr = 0l
             try {
-                // ucpMem.deregister()
                 NativeEpoll.close(fd)
                 NativeEpoll.munmap(mmapPtr, length)
             } catch {
@@ -189,9 +185,9 @@ object UcxFileRegion {
     private val fileField = clazz.getDeclaredField("file")
     private val fField = clazz.getDeclaredField("f")
     val O_RDWR = NativeEpoll.O_RDWR
-    val PAGE_SIZE = 4096l // PooledByteBufAllocator.defaultPageSize()
     val MAP_PROT = NativeEpoll.PROT_READ | NativeEpoll.PROT_WRITE
     val MAP_FLAG = NativeEpoll.MAP_SHARED
+    val PAGE_SIZE = 4096l // PooledByteBufAllocator.defaultPageSize()
 
     fileField.setAccessible(true)
     fField.setAccessible(true)

@@ -81,11 +81,10 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
         }
         if (!readBufs.isEmpty()) {
             val pipe = pipeline()
-            val mask = Int.MaxValue >> 1
             var msg = readBufs.remove(readSN)
             while (msg != null) {
                 pipe.fireChannelRead(msg)
-                readSN = (readSN + 1) & mask
+                readSN = (readSN + 1) & Short.MaxValue
                 msg = readBufs.remove(readSN)
             }
             pipe.fireChannelReadComplete()
@@ -173,7 +172,7 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
             underlyingUnsafe.doWrite0(nioBuf, writeCb)
         }
         writeInFlight += 1
-        writeSN = (writeSN + 1) & (Int.MaxValue >> 1)
+        writeSN = (writeSN + 1) & Short.MaxValue
         return 1
     }
 

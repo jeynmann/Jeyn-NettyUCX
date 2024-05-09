@@ -11,7 +11,6 @@ import org.apache.spark.network.buffer.ManagedBuffer;
 import org.apache.spark.network.client.ChunkReceivedCallback;
 import org.apache.spark.network.client.RpcResponseCallback;
 import org.apache.spark.network.client.StreamCallback;
-import org.apache.spark.network.client.TransportClient;
 import org.apache.spark.network.client.NettyUcxTransportClient;
 import org.apache.spark.network.server.OneForOneStreamManager;
 import org.apache.spark.network.shuffle.protocol.BlockTransferMessage;
@@ -20,7 +19,7 @@ import org.apache.spark.network.shuffle.protocol.StreamHandle;
 import org.apache.spark.network.util.TransportConf;
 
 /**
- * Simple wrapper on top of a TransportClient which interprets each chunk as a whole block, and
+ * Simple wrapper on top of a NettyUcxTransportClient which interprets each chunk as a whole block, and
  * invokes the BlockFetchingListener appropriately. This class is agnostic to the actual RPC
  * handler, as long as there is a single "open blocks" message which returns a ShuffleStreamHandle,
  * and Java serialization is used.

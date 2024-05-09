@@ -18,6 +18,8 @@
 package org.apache.spark.network;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import io.netty.channel.Channel;
 import io.netty.channel.socket.SocketChannel;
@@ -25,15 +27,15 @@ import io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.spark.network.client.TransportClient;
+import org.apache.spark.network.client.NettyUcxTransportClient;
 import org.apache.spark.network.client.TransportClientBootstrap;
 import org.apache.spark.network.client.NettyUcxTransportClientFactory;
-import org.apache.spark.network.client.TransportResponseHandler;
+import org.apache.spark.network.client.NettyUcxTransportResponseHandler;
 import org.apache.spark.network.protocol.MessageDecoder;
 import org.apache.spark.network.protocol.NettyUcxMessageEncoder;
 import org.apache.spark.network.server.RpcHandler;
 import org.apache.spark.network.server.TransportChannelHandler;
-import org.apache.spark.network.server.TransportRequestHandler;
+import org.apache.spark.network.server.NettyUcxTransportRequestHandler;
 import org.apache.spark.network.server.NettyUcxTransportServer;
 import org.apache.spark.network.server.TransportServerBootstrap;
 import org.apache.spark.network.util.NettyUtils;
@@ -45,13 +47,13 @@ import org.apache.spark.network.util.TransportFrameDecoder;
  * setup Netty Channel pipelines with a
  * {@link org.apache.spark.network.server.TransportChannelHandler}.
  *
- * There are two communication protocols that the TransportClient provides, control-plane RPCs and
+ * There are two communication protocols that the NettyUcxTransportClient provides, control-plane RPCs and
  * data-plane "chunk fetching". The handling of the RPCs is performed outside of the scope of the
  * NettyUcxTransportContext (i.e., by a user-provided handler), and it is responsible for setting up streams
  * which can be streamed through the data plane in chunks using zero-copy IO.
  *
  * The NettyUcxTransportServer and NettyUcxTransportClientFactory both create a TransportChannelHandler for each
- * channel. As each TransportChannelHandler contains a TransportClient, this enables server
+ * channel. As each TransportChannelHandler contains a NettyUcxTransportClient, this enables server
  * processes to send messages back to the client on an existing channel.
  */
 public class NettyUcxTransportContext extends TransportContext {
@@ -78,6 +80,8 @@ public class NettyUcxTransportContext extends TransportContext {
   TransportConf conf;
   RpcHandler rpcHandler;
   boolean closeIdleConnections;
+  ExecutorService clientService;
+  ExecutorService serverService;
 
   public NettyUcxTransportContext(TransportConf conf, RpcHandler rpcHandler) {
     this(conf, rpcHandler, false);
@@ -91,6 +95,10 @@ public class NettyUcxTransportContext extends TransportContext {
     this.conf = conf;
     this.rpcHandler = rpcHandler;
     this.closeIdleConnections = closeIdleConnections;
+    clientService = Executors.newFixedThreadPool(
+      conf.clientThreads(), new UcxThreadFactory().setPrefix("UCX-client-"));
+    serverService = Executors.newFixedThreadPool(
+      conf.serverThreads(), new UcxThreadFactory().setPrefix("UCX-server-"));
   }
 
   public int fileFrameSize() {
@@ -128,9 +136,9 @@ public class NettyUcxTransportContext extends TransportContext {
    * @param channel The channel to initialize.
    * @param channelRpcHandler The RPC handler to use for the channel.
    *
-   * @return Returns the created TransportChannelHandler, which includes a TransportClient that can
-   * be used to communicate on this channel. The TransportClient is directly associated with a
-   * ChannelHandler to ensure all users of the same channel get the same TransportClient object.
+   * @return Returns the created TransportChannelHandler, which includes a NettyUcxTransportClient that can
+   * be used to communicate on this channel. The NettyUcxTransportClient is directly associated with a
+   * ChannelHandler to ensure all users of the same channel get the same NettyUcxTransportClient object.
    */
   @Override
   public TransportChannelHandler initializePipeline(
@@ -159,11 +167,39 @@ public class NettyUcxTransportContext extends TransportContext {
    * properties (such as the remoteAddress()) may not be available yet.
    */
   private TransportChannelHandler createChannelHandler(Channel channel, RpcHandler rpcHandler) {
-    TransportResponseHandler responseHandler = new TransportResponseHandler(channel);
-    TransportClient client = new TransportClient(channel, responseHandler);
-    TransportRequestHandler requestHandler = new TransportRequestHandler(channel, client,
-      rpcHandler, conf.maxChunksBeingTransferred());
+    NettyUcxTransportResponseHandler responseHandler =
+      new NettyUcxTransportResponseHandler(channel, clientService);
+    NettyUcxTransportClient client = new NettyUcxTransportClient(channel, responseHandler);
+    NettyUcxTransportRequestHandler requestHandler =
+      new NettyUcxTransportRequestHandler(channel, serverService, client, rpcHandler, conf.maxChunksBeingTransferred());
     return new TransportChannelHandler(client, responseHandler, requestHandler,
       conf.connectionTimeoutMs(), closeIdleConnections);
+  }
+}
+
+class UcxThreadFactory implements java.util.concurrent.ThreadFactory {
+  private boolean daemon = true;
+  private String prefix = "UCX-";
+
+  class NamedThread extends Thread {
+    public NamedThread(Runnable r) {
+      super(r);
+      setName(prefix + super.getName());
+      setDaemon(daemon);
+    }
+  }
+
+  public Thread newThread(Runnable r) {
+    return new NamedThread(r);
+  }
+
+  public UcxThreadFactory setDaemon(boolean isDaemon) {
+    daemon = isDaemon;
+    return this;
+  }
+
+  public UcxThreadFactory setPrefix(String name) {
+    prefix = name;
+    return this;
   }
 }

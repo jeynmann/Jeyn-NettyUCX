@@ -51,7 +51,7 @@ import static org.apache.spark.network.util.NettyUtils.getRemoteAddress;
  * NettyUcxTransportClient may be used for multiple streams, but any given stream must be restricted to a
  * single client, in order to avoid out-of-order responses.
  *
- * NB: This class is used to make requests to the server, while {@link TransportResponseHandler} is
+ * NB: This class is used to make requests to the server, while {@link NettyUcxTransportResponseHandler} is
  * responsible for handling responses from the server.
  *
  * Concurrency: thread safe and can be called from multiple threads.
@@ -60,9 +60,9 @@ public class NettyUcxTransportClient extends TransportClient {
   private static final Logger logger = LoggerFactory.getLogger(NettyUcxTransportClient.class);
 
   Channel channel;
-  TransportResponseHandler handler;
+  NettyUcxTransportResponseHandler handler;
 
-  public NettyUcxTransportClient(Channel channel, TransportResponseHandler handler) {
+  public NettyUcxTransportClient(Channel channel, NettyUcxTransportResponseHandler handler) {
     super(channel, handler);
     this.channel = channel;
     this.handler = handler;

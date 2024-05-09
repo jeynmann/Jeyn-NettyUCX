@@ -17,13 +17,19 @@
 
 package org.apache.spark.network.server;
 
+import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.util.concurrent.ExecutorService;
+
 import com.google.common.base.Throwables;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.spark.network.buffer.ManagedBuffer;
+import org.apache.spark.network.buffer.FileSegmentManagedBuffer;
+import org.apache.spark.network.buffer.NettyManagedBuffer;
 import org.apache.spark.network.client.*;
 import org.apache.spark.network.protocol.*;
 
@@ -44,7 +50,7 @@ public class NettyUcxTransportRequestHandler extends TransportRequestHandler {
   Channel channel;
 
   /** Client on the same channel allowing us to talk back to the requester. */
-  TransportClient reverseClient;
+  NettyUcxTransportClient reverseClient;
 
   /** Handles all RPC messages. */
   RpcHandler rpcHandler;
@@ -55,13 +61,18 @@ public class NettyUcxTransportRequestHandler extends TransportRequestHandler {
   /** The max number of chunks being transferred and not finished yet. */
   long maxChunksBeingTransferred;
 
+  /** Thread pool to handle message */
+  ExecutorService executor;
+
   public NettyUcxTransportRequestHandler(
       Channel channel,
-      TransportClient reverseClient,
+      ExecutorService executor,
+      NettyUcxTransportClient reverseClient,
       RpcHandler rpcHandler,
       Long maxChunksBeingTransferred) {
     super(channel, reverseClient, rpcHandler, maxChunksBeingTransferred);
     this.channel = channel;
+    this.executor = executor;
     this.reverseClient = reverseClient;
     this.rpcHandler = rpcHandler;
     this.streamManager = rpcHandler.getStreamManager();
@@ -73,7 +84,12 @@ public class NettyUcxTransportRequestHandler extends TransportRequestHandler {
     if (request instanceof ChunkFetchRequest) {
       processFetchRequestInBatch((ChunkFetchRequest) request);
     } else {
-      super.handle(request);
+      executor.execute(new Runnable() {
+        @Override
+        public void run() {
+          NettyUcxTransportRequestHandler.super.handle(request);
+        }
+      });
     }
   }
 
@@ -90,25 +106,41 @@ public class NettyUcxTransportRequestHandler extends TransportRequestHandler {
       return;
     }
 
-    long streamId = req.streamChunkId.streamId;
-    int chunkNums = req.streamChunkId.chunkIndex;
-    for (int chunkIndex = 0; chunkIndex != chunkNums; ++chunkIndex) {
-        StreamChunkId streamChunkId = new StreamChunkId(streamId, chunkIndex);
-        ManagedBuffer buf;
-        try {
-          streamManager.checkAuthorization(reverseClient, streamId);
-          buf = streamManager.getChunk(streamId, chunkIndex);
-        } catch (Exception e) {
-          logger.error(String.format("Error opening block %s for request from %s",
-            streamChunkId, getRemoteAddress(channel)), e);
-            writeAndFlush(new ChunkFetchFailure(streamChunkId, Throwables.getStackTraceAsString(e)));
-          return;
-        }
-        
-        streamManager.chunkBeingSent(streamId);
-        writeAndFlush(new ChunkFetchSuccess(streamChunkId, buf)).addListener(future -> {
-          streamManager.chunkSent(streamId);
+    final long streamId = req.streamChunkId.streamId;
+    final int chunkNums = req.streamChunkId.chunkIndex;
+    for (int i = 0; i != chunkNums; ++i) {
+      final StreamChunkId streamChunkId = new StreamChunkId(streamId, i);
+      try {
+        streamManager.checkAuthorization(reverseClient, streamId);
+        final FileSegmentManagedBuffer fileBufs = (FileSegmentManagedBuffer) streamManager.getChunk(streamId, i);
+        executor.execute(new Runnable() {
+          @Override
+          public void run() {
+            try {
+              final int len = (int) fileBufs.getLength();
+              final ByteBuf buf = channel.alloc().directBuffer(len);
+              final FileChannel file = new RandomAccessFile(fileBufs.getFile(), "r").getChannel();
+    
+              buf.writeBytes(file, fileBufs.getOffset(), len);
+
+              final NettyManagedBuffer msg = new NettyManagedBuffer(buf);
+              writeAndFlush(new ChunkFetchSuccess(streamChunkId, msg)).addListener(future -> {
+                streamManager.chunkSent(streamId);
+              });
+            } catch (Exception e) {
+              throw new RuntimeException(e);
+            } finally {
+              fileBufs.release();
+            }
+          }
         });
+      } catch (Exception e) {
+        logger.error(String.format("Error opening block %s for request from %s",
+          streamChunkId, getRemoteAddress(channel)), e);
+          writeAndFlush(new ChunkFetchFailure(streamChunkId, Throwables.getStackTraceAsString(e)));
+        return;
+      }
+      streamManager.chunkBeingSent(streamId);
     }
   }
 

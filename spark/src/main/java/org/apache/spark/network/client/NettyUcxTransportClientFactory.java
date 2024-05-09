@@ -49,24 +49,24 @@ import org.apache.spark.network.server.TransportChannelHandler;
 import org.apache.spark.network.util.*;
 
 /**
- * Factory for creating {@link TransportClient}s by using createClient.
+ * Factory for creating {@link NettyUcxTransportClient}s by using createClient.
  *
  * The factory maintains a connection pool to other hosts and should return the same
- * TransportClient for the same remote host. It also shares a single worker thread pool for
+ * NettyUcxTransportClient for the same remote host. It also shares a single worker thread pool for
  * all TransportClients.
  *
  * TransportClients will be reused whenever possible. Prior to completing the creation of a new
- * TransportClient, all given {@link TransportClientBootstrap}s will be run.
+ * NettyUcxTransportClient, all given {@link TransportClientBootstrap}s will be run.
  */
 public class NettyUcxTransportClientFactory implements Closeable {
 
   /** A simple data structure to track the pool of clients between two peer nodes. */
   private static class ClientPool {
-    TransportClient[] clients;
+    NettyUcxTransportClient[] clients;
     Object[] locks;
 
     ClientPool(int size) {
-      clients = new TransportClient[size];
+      clients = new NettyUcxTransportClient[size];
       locks = new Object[size];
       for (int i = 0; i < size; i++) {
         locks[i] = new Object();
@@ -122,20 +122,20 @@ public class NettyUcxTransportClientFactory implements Closeable {
   }
 
   /**
-   * Create a {@link TransportClient} connecting to the given remote host / port.
+   * Create a {@link NettyUcxTransportClient} connecting to the given remote host / port.
    *
    * We maintains an array of clients (size determined by spark.shuffle.io.numConnectionsPerPeer)
    * and randomly picks one to use. If no client was previously created in the randomly selected
    * spot, this function creates a new client and places it there.
    *
-   * Prior to the creation of a new TransportClient, we will execute all
+   * Prior to the creation of a new NettyUcxTransportClient, we will execute all
    * {@link TransportClientBootstrap}s that are registered with this factory.
    *
    * This blocks until a connection is successfully established and fully bootstrapped.
    *
    * Concurrency: This method is safe to call from multiple threads.
    */
-  public TransportClient createClient(String remoteHost, int remotePort)
+  public NettyUcxTransportClient createClient(String remoteHost, int remotePort)
       throws IOException, InterruptedException {
     // Get connection from the connection pool first.
     // If it is not found or not active, create a new one.
@@ -151,7 +151,7 @@ public class NettyUcxTransportClientFactory implements Closeable {
     }
 
     int clientIndex = rand.nextInt(numConnectionsPerPeer);
-    TransportClient cachedClient = clientPool.clients[clientIndex];
+    NettyUcxTransportClient cachedClient = clientPool.clients[clientIndex];
 
     if (cachedClient != null && cachedClient.isActive()) {
       // Make sure that the channel will not timeout by updating the last use time of the
@@ -198,19 +198,19 @@ public class NettyUcxTransportClientFactory implements Closeable {
   }
 
   /**
-   * Create a completely new {@link TransportClient} to the given remote host / port.
+   * Create a completely new {@link NettyUcxTransportClient} to the given remote host / port.
    * This connection is not pooled.
    *
    * As with {@link #createClient(String, int)}, this method is blocking.
    */
-  public TransportClient createUnmanagedClient(String remoteHost, int remotePort)
+  public NettyUcxTransportClient createUnmanagedClient(String remoteHost, int remotePort)
       throws IOException, InterruptedException {
     final InetSocketAddress address = new InetSocketAddress(remoteHost, remotePort);
     return createClient(address);
   }
 
-  /** Create a completely new {@link TransportClient} to the remote address. */
-  private TransportClient createClient(InetSocketAddress address)
+  /** Create a completely new {@link NettyUcxTransportClient} to the remote address. */
+  private NettyUcxTransportClient createClient(InetSocketAddress address)
       throws IOException, InterruptedException {
     logger.debug("Creating new connection to {}", address);
 
@@ -220,14 +220,14 @@ public class NettyUcxTransportClientFactory implements Closeable {
       .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, conf.connectionTimeoutMs())
       .option(ChannelOption.ALLOCATOR, pooledAllocator);
 
-    final AtomicReference<TransportClient> clientRef = new AtomicReference<>();
+    final AtomicReference<NettyUcxTransportClient> clientRef = new AtomicReference<>();
     final AtomicReference<Channel> channelRef = new AtomicReference<>();
 
     bootstrap.handler(new ChannelInitializer<UcxSocketChannel>() {
       @Override
       public void initChannel(UcxSocketChannel ch) {
         TransportChannelHandler clientHandler = context.initializePipeline(ch);
-        clientRef.set((TransportClient)clientHandler.getClient());
+        clientRef.set((NettyUcxTransportClient)clientHandler.getClient());
         channelRef.set(ch);
       }
     });
@@ -242,7 +242,7 @@ public class NettyUcxTransportClientFactory implements Closeable {
       throw new IOException(String.format("Failed to connect to %s", address), cf.cause());
     }
 
-    TransportClient client = clientRef.get();
+    NettyUcxTransportClient client = clientRef.get();
     Channel channel = channelRef.get();
     assert client != null : "Channel future completed successfully with null client";
 
@@ -273,7 +273,7 @@ public class NettyUcxTransportClientFactory implements Closeable {
     // Go through all clients and close them if they are active.
     for (ClientPool clientPool : connectionPool.values()) {
       for (int i = 0; i < clientPool.clients.length; i++) {
-        TransportClient client = clientPool.clients[i];
+        NettyUcxTransportClient client = clientPool.clients[i];
         if (client != null) {
           clientPool.clients[i] = null;
           JavaUtils.closeQuietly(client);

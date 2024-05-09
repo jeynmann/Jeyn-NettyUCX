@@ -30,10 +30,10 @@ import org.apache.spark.{SecurityManager, SparkConf}
 import org.apache.spark.internal.config
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
-import org.apache.spark.network.client.{RpcResponseCallback, TransportClientBootstrap, NettyUcxTransportClientFactory}
+import org.apache.spark.network.client.{RpcResponseCallback, TransportClientBootstrap, NettyUcxTransportClient, NettyUcxTransportClientFactory}
 import org.apache.spark.network.crypto.{AuthClientBootstrap, AuthServerBootstrap}
 import org.apache.spark.network.server._
-import org.apache.spark.network.shuffle.{BlockFetchingListener, DownloadFileManager, OneForOneBlockFetcher, RetryingBlockFetcher}
+import org.apache.spark.network.shuffle.{BlockFetchingListener, DownloadFileManager, NettyUcxBlockFetcher, RetryingBlockFetcher}
 import org.apache.spark.network.shuffle.protocol.{UploadBlock, UploadBlockStream}
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.shuffle.NettyUcxShuffleManager
@@ -116,7 +116,7 @@ class NettyUcxBlockTransferService (
         override def createAndStart(blockIds: Array[String], listener: BlockFetchingListener) {
           val ucxPort = shuffleManager.getUcxPort(execId)
           val client = clientFactory.createClient(host, ucxPort)
-          new OneForOneBlockFetcher(client, appId, execId, blockIds, listener,
+          new NettyUcxBlockFetcher(client, appId, execId, blockIds, listener,
             transportConf, tempFileManager).start()
         }
       }

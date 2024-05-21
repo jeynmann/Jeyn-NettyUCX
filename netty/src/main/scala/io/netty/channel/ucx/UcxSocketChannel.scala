@@ -112,6 +112,8 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
 
         ucxUnsafe.setSocketAddress(remoteAddress.asInstanceOf[java.net.InetSocketAddress])
         ucxUnsafe.doConnect0()
+
+        local = localAddress.asInstanceOf[java.net.InetSocketAddress]
     }
 
     override
@@ -423,8 +425,6 @@ class UcxSocketChannel(parent: UcxServerSocketChannel)
                 ucpEp = ucpWorker.newEndpoint(ucpEpParam)
 
                 doExchangeId0()
-
-                // local = ucpEp.getLocalAddress()
             } catch {
                 case e: Throwable => {
                     logError(s"CONNECT $local -x-> $remote: $e $ucpEpParam")

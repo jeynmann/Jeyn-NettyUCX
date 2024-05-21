@@ -37,25 +37,32 @@ class NativeEpollApi {
     static native int nativeFdFromEpollEvents(long address, int id);
     static native int nativeEventsFromEpollEvents(long address, int id);
 
+    static native long nativeMalloc(long size);
+    static native void nativeFree(long address);
+    static native void nativeMemcpy(long dest, long src, long size);
+
     static native int nativeORdonly();
     static native int nativeOWronly();
     static native int nativeORdwr();
+    static native int nativeODirect();
+    static native int nativeOCreat();
 
     static native int nativeProtRead();
     static native int nativeProtWrite();
     static native int nativeProtExec();
 
+    static native int nativeOpen(String path, int flags);
+    static native int nativeClose(int fd);
+    static native int nativeFtruncate(int fd, long len);
+    static native long nativeStatSize(int fd);
+    static native long nativePread(int fd, long buf, long len, long pos);
+    static native long nativePwrite(int fd, long buf, long len, long pos);
+
     static native int nativeMapShared();
     static native int nativeMapPrivate();
     static native int nativeMapFixed();
     static native int nativeMapPopulate();
-    static native int nativeMapFailed();
-
-    static native long nativeMalloc(long size);
-    static native void nativeFree(long address);
-    static native int nativeOpen(String path, int flags);
-    static native int nativeClose(int fd);
-    static native void nativeMemcpy(long dest, long src, long size);
+    static native long nativeMapFailed();
 
     static native long nativeMmap(long address, long len, int prot, int flags, int fd, long offset);
     static native int nativeMunmap(long address, long len);
@@ -166,6 +173,8 @@ public class NativeEpoll extends NativeEpollApi {
     public static int O_RDONLY = nativeORdonly();
     public static int O_WRONLY = nativeOWronly();
     public static int O_RDWR = nativeORdwr();
+    public static int O_DIRECT = nativeODirect();
+    public static int O_CREAT = nativeOCreat();
 
     public static int PROT_READ = nativeProtRead();
     public static int PROT_WRITE = nativeProtWrite();
@@ -301,7 +310,19 @@ public class NativeEpoll extends NativeEpollApi {
         return nativeEventsFromEpollEvents(address, id);
     }
 
-    static int open(String path, int flags) throws IOException {
+    public static long alloc(long size) {
+        return nativeMalloc(size);
+    }
+
+    public static void free(long address) {
+        nativeFree(address);
+    }
+
+    public static void memcpy(long dest, long src, long size) {
+        nativeMemcpy(dest, src, size);
+    }
+
+    public static int open(String path, int flags) throws IOException {
         int fd = nativeOpen(path, flags);
         if (fd < 0) {
             throw new IOException("open: " + fd);
@@ -316,16 +337,36 @@ public class NativeEpoll extends NativeEpollApi {
         }
     }
 
-    public static long alloc(long size) {
-        return nativeMalloc(size);
+    public static int ftruncate(int fd, long len) throws IOException {
+        int res = nativeFtruncate(fd, len);
+        if (res < 0) {
+            throw new IOException("stat: " + res);
+        }
+        return res;
     }
 
-    public static void free(long address) {
-        nativeFree(address);
+    public static long statSize(int fd) throws IOException {
+        long res = nativeStatSize(fd);
+        if (res < 0) {
+            throw new IOException("stat: " + res);
+        }
+        return res;
     }
 
-    public static void memcpy(long dest, long src, long size) {
-        nativeMemcpy(dest, src, size);
+    public static long pread(int fd, long buf, long len, long pos) throws IOException {
+        long res = nativePread(fd, buf, len, pos);
+        if (res < 0) {
+            throw new IOException("pread: " + res);
+        }
+        return res;
+    }
+
+    public static long pwrite(int fd, long buf, long len, long pos) throws IOException {
+        long res = nativePwrite(fd, buf, len, pos);
+        if (res < 0) {
+            throw new IOException("pwrite: " + res);
+        }
+        return res;
     }
 
     public static long mmap(long address, long len, int prot, int flags, int fd, long offset) throws IOException {

@@ -1,5 +1,9 @@
 #include "native_epoll.h"
 
+#ifndef __USE_GNU
+#define __USE_GNU
+#endif
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +14,7 @@
 #include <sys/un.h>
 #include <sys/types.h>
 #include <sys/timerfd.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
@@ -222,12 +227,59 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeORdwr(JNIE
     return O_RDWR;
 }
 
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeODirect(JNIEnv* env, jclass clazz) {
+    return O_DIRECT;
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOCreat(JNIEnv* env, jclass clazz) {
+    return O_CREAT;
+}
+
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOpen(JNIEnv* env, jclass clazz, jstring path, jint flags) {
     return open((*env)->GetStringUTFChars(env, path, 0), flags);
 }
 
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose(JNIEnv* env, jclass clazz, jint fd) {
     return close(fd);
+}
+
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeFtruncate(JNIEnv* env, jclass clazz, jint fd, jlong len) {
+    jint res = ftruncate(fd, len);
+    if (res < 0) {
+        return -errno;
+    }
+
+    return res;
+}
+
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeStatSize(JNIEnv* env, jclass clazz, jint fd) {
+    struct stat st;
+    jlong res;
+
+    res = fstat(fd, &st);
+    if (res < 0) {
+        return -errno;
+    }
+
+    return st.st_size;
+}
+
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativePread(JNIEnv* env, jclass clazz, jint fd, jlong buf, jlong pos, jlong len) {
+    long res = pread(fd, (void*) buf, pos, len);
+    if (res < 0) {
+        return -errno;
+    }
+
+    return res;
+}
+
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativePwrite(JNIEnv* env, jclass clazz, jint fd, jlong buf, jlong pos, jlong len) {
+    long res = pwrite(fd, (void*) buf, pos, len);
+    if (res < 0) {
+        return -errno;
+    }
+
+    return res;
 }
 
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtRead(JNIEnv* env, jclass clazz) {

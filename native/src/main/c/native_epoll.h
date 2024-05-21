@@ -193,6 +193,30 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeEventsFrom
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMalloc
+ * Signature: (J)J
+ */
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMalloc
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeFree
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeFree
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeMemcpy
+ * Signature: (JJJ)V
+ */
+JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy
+  (JNIEnv *, jclass, jlong, jlong, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
  * Method:    nativeORdonly
  * Signature: ()I
  */
@@ -213,6 +237,22 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOWronly
  * Signature: ()I
  */
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeORdwr
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeODirect
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeODirect
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeOCreat
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOCreat
   (JNIEnv *, jclass);
 
 /*
@@ -238,6 +278,54 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtWrite
  */
 JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeProtExec
   (JNIEnv *, jclass);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeOpen
+ * Signature: (Ljava/lang/String;I)I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOpen
+  (JNIEnv *, jclass, jstring, jint);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeClose
+ * Signature: (I)I
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose
+  (JNIEnv *, jclass, jint);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeFtruncate
+ * Signature: (I)J
+ */
+JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeFtruncate
+  (JNIEnv *, jclass, jint, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativeStatSize
+ * Signature: (I)J
+ */
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeStatSize
+  (JNIEnv *, jclass, jint);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativePread
+ * Signature: (IJJJ)J
+ */
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativePread
+  (JNIEnv *, jclass, jint, jlong, jlong, jlong);
+
+/*
+ * Class:     io_netty_channel_ucx_NativeEpollApi
+ * Method:    nativePwrite
+ * Signature: (IJJJ)J
+ */
+JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativePwrite
+  (JNIEnv *, jclass, jint, jlong, jlong, jlong);
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
@@ -274,50 +362,10 @@ JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapPopulat
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi
  * Method:    nativeMapFailed
- * Signature: ()I
+ * Signature: ()J
  */
 JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMapFailed
   (JNIEnv *, jclass);
-
-/*
- * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeMalloc
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMalloc
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeFree
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeFree
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeOpen
- * Signature: (Ljava/lang/String;I)I
- */
-JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeOpen
-  (JNIEnv *, jclass, jstring, jint);
-
-/*
- * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeClose
- * Signature: (I)I
- */
-JNIEXPORT jint JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeClose
-  (JNIEnv *, jclass, jint);
-
-/*
- * Class:     io_netty_channel_ucx_NativeEpollApi
- * Method:    nativeMemcpy
- * Signature: (JJJ)V
- */
-JNIEXPORT void JNICALL Java_io_netty_channel_ucx_NativeEpollApi_nativeMemcpy
-  (JNIEnv *, jclass, jlong, jlong, jlong);
 
 /*
  * Class:     io_netty_channel_ucx_NativeEpollApi

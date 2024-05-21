@@ -28,7 +28,6 @@ See file LICENSE for terms.
 
   <modules>
     <module>native</module>
-    <module>dio</module>
     <module>netty</module>
     <module>spark</module>
   </modules>

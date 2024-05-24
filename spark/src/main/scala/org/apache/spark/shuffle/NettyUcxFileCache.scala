@@ -11,6 +11,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
+import org.apache.log4j.LogManager
+import org.apache.log4j.PropertyConfigurator
+
 import io.netty.util.AbstractReferenceCounted
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.Unpooled
@@ -68,6 +71,10 @@ class IOTask protected[dio]() {
     def complete(): Unit = {
         op.set(IOTask.OP_FIN)
     }
+
+    override def toString(): String = {
+        s"IOTask(op=${op.get()}, fd=$fd, buf=$buf, len=$len, pos=$pos)"
+    }
 }
 
 object IOTask {
@@ -94,14 +101,20 @@ class IOWorker protected[dio](parent: IOService, queueDepth: Int) extends Thread
     override def run(): Unit = {
         while (!parentStop.get()) {
             val task = pendTask.take()
-            task.op.get() match {
-                case IOTask.OP_READ => 
-                    NativeEpoll.pread(task.fd, task.buf, task.len, task.pos)
-                    task.complete()
-                case IOTask.OP_WRITE =>
-                    NativeEpoll.pwrite(task.fd, task.buf, task.len, task.pos)
-                    task.complete()
-                case _: Int => {}
+            try {
+                task.op.get() match {
+                    case IOTask.OP_READ =>
+                        IOService.logDev(s"pread($task)")
+                        NativeEpoll.pread(task.fd, task.buf, task.len, task.pos)
+                        task.complete()
+                    case IOTask.OP_WRITE =>
+                        IOService.logDev(s"pwrite($task)")
+                        NativeEpoll.pwrite(task.fd, task.buf, task.len, task.pos)
+                        task.complete()
+                    case _: Int => {}
+                }
+            } catch {
+                case e: IOException => IOService.logError(s"$task", e)
             }
         }
     }
@@ -117,6 +130,7 @@ class IOService(numWorker: Int, queueDepth: Int) {
     }
 
     def start(): Unit = {
+        IOService.logDev(s"start($numWorker, $queueDepth)")
         for (i <- 0 until workers.size) {
             workers(i) = new IOWorker(this, queueDepth)
             workers(i).start()
@@ -124,13 +138,22 @@ class IOService(numWorker: Int, queueDepth: Int) {
     }
 
     def close(): Unit = {
+        IOService.logDev(s"stop($workers)")
         stop.set(true)
         workers.foreach(_.wakeup())
     }
 }
 
-object IOService {
+object IOService extends UcxLogging {
     private var inst: IOService = _
+
+    override def logDev(msg: => String): Unit = {
+        super.logDev(msg)
+    }
+
+    override def logError(msg: => String, e: Throwable): Unit = {
+        super.logError(msg, e)
+    }
 
     def instance() = inst
 
@@ -138,6 +161,11 @@ object IOService {
         assert(inst == null)
         inst = new IOService(numWorker, queueDepth)
         inst.start()
+    }
+
+    def close(): Unit = {
+        assert(inst != null)
+        inst.close()
     }
 }
 
@@ -168,7 +196,7 @@ class PageCache protected[dio](val address: Long) {
             syned()
         }
         // assert(pos + len <= offset + length)
-        FileService.debug(s"${this.getClass} read${(fd, pos, len)}")
+        FileService.logDev(s"read($fd, $pos, $len)")
         return Unpooled.wrappedBuffer(address + pos, len, false)
     }
 
@@ -179,7 +207,7 @@ class PageCache protected[dio](val address: Long) {
             dirty()
         }
         // assert(pos + len <= offset + length)
-        FileService.debug(s"${this.getClass} write${(fd, pos, len)}")
+        FileService.logDev(s"write($fd, $pos, $len)")
         buf.readBytes(inner)
         buf.readerIndex() - readerIndex
     }
@@ -187,7 +215,7 @@ class PageCache protected[dio](val address: Long) {
     def readBackend(fd: Int): Unit = {
         if (ioTask.tryRead()) {
             ioTask.reset(fd, address, length, offset)
-            FileService.debug(s"${this.getClass} readBackend${(fd, address, length, offset)}")
+            PageCache.logDev(s"post($fd, $address, $length, $offset)")
             IOService.instance().post(ioTask)
         }
     }
@@ -195,18 +223,16 @@ class PageCache protected[dio](val address: Long) {
     def writeBackend(fd: Int): Unit = {
         if (ioTask.tryWrite()) {
             ioTask.reset(fd, address, length, offset)
-            FileService.debug(s"${this.getClass} writeBackend${(fd, address, length, offset)}")
+            PageCache.logDev(s"post($fd, $address, $length, $offset)")
             IOService.instance().post(ioTask)
         }
     }
 
     def retain(fd: Int): Int = {
-        FileService.debug(s"${this.getClass} retain${(fd)}")
         refCnt.incrementAndGet()
     }
 
     def release(fd: Int): Int = {
-        FileService.debug(s"${this.getClass} release${(fd)}")
         val rc = refCnt.decrementAndGet()
         if (rc == 1) {
             if (isDirty()) {
@@ -241,9 +267,17 @@ class PageCache protected[dio](val address: Long) {
     def isIOComplete() = {
         ioTask.isComplete()
     }
+
+    override def toString(): String = {
+        s"PageCache(refCnt=${refCnt.get()}, state=${state.get()}, ioTask=$ioTask, parent=$parent, offset=$offset length=$length)"
+    }
 }
 
-object PageCache {
+object PageCache extends UcxLogging {
+    override def logDev(msg: => String): Unit = {
+        super.logDev(msg)
+    }
+
     def pageSize(): Int = pgSize
 
     def blockSize(): Int = blkSize
@@ -266,6 +300,7 @@ object PageCache {
     }
 
     def initialize(ucpContext: UcpContext, pageSize: Int, blockSize: Int, blockNum: Int): Unit = {
+        logDev(s"initialize($ucpContext, $pageSize, $blockSize, $blockNum)")
         assert(ucpParams == null)
         pgSize = pageSize
         blkSize = blockSize
@@ -282,6 +317,7 @@ object PageCache {
     }
 
     def close(): Unit = {
+        logDev(s"close($ucpMems)")
         ucpMems.foreach(_.deregister())
     }
 
@@ -313,8 +349,7 @@ class FileCache protected[dio](parent: FileService, val path: String) {
         val alignEnd = PageCache.alignUp(pos + len, pageSize)
         val positions = alignPos until alignEnd by pageSize
 
-        FileService.debug(s"${this.getClass} prepare${(fd, pos, len)}")
-        FileService.debug(s"${this.getClass} prepare${(fd, pageSize, alignPos, alignEnd, positions)}")
+        FileService.logDev(s"prepare($fd, $flag, $pos, $len)")
         positions.map(p => {
             pages.computeIfAbsent(p, p => {
                 parent.allocate().reset(this, p, pageSize)
@@ -323,33 +358,31 @@ class FileCache protected[dio](parent: FileService, val path: String) {
     }
 
     def retain(): Int = {
-        FileService.debug(s"${this.getClass} retain")
         refCnt.incrementAndGet()
     }
 
     def release(): Int = {
-        FileService.debug(s"${this.getClass} release")
         val rc = refCnt.decrementAndGet()
         if (rc == 0) {
             deallocate()
             return rc
         }
         if (rc == 1) {
-            parent.release(this)
+            parent.recycle(this)
             return rc
         }
         return rc
     }
 
     def deallocate(): Unit = {
-        FileService.debug(s"${this.getClass} deallocate")
+        FileService.logDev(s"deallocate($pages)")
         pages.values().forEach(parent.deallocate(_))
         pages.clear()
     }
 }
 
 class FileHandle protected[dio] (val path: String, val flag: Int, cache: FileCache)
-    extends Closeable {
+    extends Closeable with UcxLogging {
     protected[dio] val fd = NativeEpoll.open(path, flag)
     protected[dio] var size = NativeEpoll.statSize(fd)
     protected[dio] var pages: Seq[PageCache] = _
@@ -387,7 +420,8 @@ class FileHandle protected[dio] (val path: String, val flag: Int, cache: FileCac
             }
         })
         buf.addComponent(last.read(fd, 0, lastLen))
-        FileService.debug(s"${this.getClass} read${(buf)}")
+
+        logDev(s"read($pos, $len) => $buf")
 
         buf
     }
@@ -419,7 +453,8 @@ class FileHandle protected[dio] (val path: String, val flag: Int, cache: FileCac
             }
         })
         written += last.write(buf, fd, 0, lastLen)
-        FileService.debug(s"${this.getClass} write${(buf)}")
+
+        logDev(s"write($buf, $pos, $len) => $written")
 
         size = size.max(pos + len)
         return written
@@ -434,11 +469,13 @@ class FileHandle protected[dio] (val path: String, val flag: Int, cache: FileCac
 
     protected[dio] def flush(p: Seq[PageCache]): Unit = {
         if (p != null) {
+            logDev(s"flush($p)")
             p.foreach(_.release(fd))
         }
     }
 
     override def close(): Unit = {
+        logDev(s"close($fd, $size)")
         flush(pages)
         if (flag != FileHandle.O_READ_ONLY) {
             NativeEpoll.ftruncate(fd, size)
@@ -470,6 +507,7 @@ class FileService protected[dio](maxTotal: Long, maxCache: Long) {
     }
 
     def initialize(): this.type = {
+        FileService.logDev(s"initialize($maxTotal, $maxCache)")
         for (i <- 0l until maxTotal by PageCache.pageSize().toLong) {
             pages.offer(PageCache.allocate())
         }
@@ -502,7 +540,7 @@ class FileService protected[dio](maxTotal: Long, maxCache: Long) {
         updateCacheSize(-PageCache.pageSize())
     }
 
-    def release(f: FileCache): Unit = {
+    def recycle(f: FileCache): Unit = {
         nouse.offer(f)
 
         var sizeNow = cacheSize.get()
@@ -542,8 +580,12 @@ class FileService protected[dio](maxTotal: Long, maxCache: Long) {
     }
 }
 
-object FileService {
+object FileService extends UcxLogging {
     private var inst: FileService = _
+
+    override def logDev(msg: => String): Unit = {
+        super.logDev(msg)
+    }
 
     def instance() = inst
 
@@ -551,12 +593,14 @@ object FileService {
         inst.open(path, perm)
     }
 
-    def close(f: FileCache): Unit = {
-        f.release()
+    def close(f: FileHandle): Unit = {
+        f.close()
     }
 
     def close(): Unit = {
         inst.close()
+        IOService.close()
+        PageCache.close()
     }
 
     def initialize(ucpContext: UcpContext, pageSize: Int, blockSize: Int, blockNum: Int,
@@ -566,21 +610,27 @@ object FileService {
         inst = new FileService(blockSize * blockNum).initialize()
     }
 
-    def debug(msg: => String): Unit = {
-        // println(s"[${System.currentTimeMillis()}] $msg")
-    }
-
-    def info(msg: => String): Unit = {
-        println(s"[${System.currentTimeMillis()}] $msg")
+    def initializeLogging(): Unit = {
+        val log4j12Initialized = LogManager.getRootLogger.getAllAppenders.hasMoreElements
+        // scalastyle:off println
+        if (!log4j12Initialized) {
+            val url = new java.io.File("log4j.properties").toURI().toURL()
+            PropertyConfigurator.configure(url)
+            println(s"Using Demo's default log4j profile: $url")
+        }
+  
+        val rootLogger = LogManager.getRootLogger()
+        rootLogger.getLevel()
     }
 
     def main(args: Array[String]): Unit = {
         println(s"[${System.currentTimeMillis()}] ${args.toSeq}")
 
+        initializeLogging()
         FileService.initialize(UcxPooledByteBufAllocator.UCP_CONTEXT,
                                64 << 10, 65536 << 10, 4)
 
-        info(s"prepare..")
+        logInfo(s"prepare..")
         val fSize = args(1).toInt
         val bSize = args(2).toInt
 
@@ -594,28 +644,27 @@ object FileService {
         }
         val wbuf = UcxPooledByteBufAllocator.DEFAULT.buffer(bSize)
 
-        info(s"open..")
+        logInfo(s"open..")
         val f0 = FileService.open(args(0), "rw")
 
-        info(s"write..")
+        logInfo(s"write..")
         var i = 0
         for (pos <- 0 until fSize by bSize) {
             i += 1
             wbuf.clear()
             wbuf.writeBytes(bytes, i % 36, bSize)
-            info(s"pos ${pos}: ${wbuf.toString(0, 32, java.nio.charset.StandardCharsets.UTF_8)}")
+            logInfo(s"pos ${pos}: ${wbuf.toString(0, 32, java.nio.charset.StandardCharsets.UTF_8)}")
             f0.write(wbuf, pos, wbuf.readableBytes())
-            debug(s"pos ${pos}: ${f0.read(pos, bSize).toString(0, 32, java.nio.charset.StandardCharsets.UTF_8)}")
         }
         f0.close()
 
-        info(s"open..")
+        logInfo(s"open..")
         val f1 = FileService.open(args(0), "r")
 
-        info(s"read..")
+        logInfo(s"read..")
         for (pos <- 0 until fSize by bSize) {
             val buf = f1.read(pos, bSize)
-            info(s"pos ${pos}: ${buf.toString(0, 32, java.nio.charset.StandardCharsets.UTF_8)}")
+            logInfo(s"pos ${pos}: ${buf.toString(0, 32, java.nio.charset.StandardCharsets.UTF_8)}")
         }
         f1.close()
     }

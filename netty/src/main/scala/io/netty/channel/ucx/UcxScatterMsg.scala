@@ -277,17 +277,17 @@ trait UcxDefaultFileRegionMsg extends UcxScatterMsg {
         val count = ((length - 1) / frameSize).toInt + 1
         ensureCapacity(writerIndex + count)
 
-        val frameSize2 = frameSize << 1
         val limit = offset + length
+        val last1 = limit - frameSize
+        val last2 = last1 - frameSize
         var offsetNow = offset
         do {
-            val remaining = (limit - offsetNow).toInt
-            val lengthNow = if (remaining > frameSize2) {
+            val lengthNow = if (offsetNow < last2) {
                 frameSize
-            } else if (remaining > frameSize) {
-                remaining >> 1
+            } else if (offsetNow < last1) {
+                (limit - offsetNow) >> 1
             } else {
-                remaining
+                limit - offsetNow
             }
             val frame = new UcxDefaultFileRegionFrame(fr, fc, offsetNow, lengthNow, alloc)
             frames.add(frame)
